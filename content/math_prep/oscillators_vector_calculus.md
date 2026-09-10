@@ -226,7 +226,7 @@ fig = Figure(size=(850, 400))
 ax1 = Axis(fig[1, 1]; aspect=DataAspect(), title="Potential Φ")
 contour!(ax1, xs, ys, Φ'; levels=[-5,-3,-1.5,-1,-0.5,0.5,1,1.5,3,5])
 ax2 = Axis(fig[1, 2]; aspect=DataAspect(), title="Field E = −∇Φ")
-arrows!(ax2, sel(X), sel(Y), -sel(∂Φ∂x), -sel(∂Φ∂y); lengthscale=0.28)
+arrows2d!(ax2, sel(X), sel(Y), -sel(∂Φ∂x), -sel(∂Φ∂y); lengthscale=0.28)
 fig
 ```
 

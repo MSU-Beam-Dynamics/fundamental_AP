@@ -1,0 +1,82 @@
+name: Build and deploy the book
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege that still lets deploy-pages mint its OIDC token.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; let a running one finish rather than cancelling,
+# since a build takes a while.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The pages pin kernelspec `julia-_trackpad-_-fundamental-ap_-1.12`, and
+      # IJulia derives that trailing version from the running Julia, so 1.12 is
+      # not a preference here — a different minor renames the kernel and MyST
+      # then fails to find it.
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+
+      - name: Instantiate the Julia environment
+        run: julia --project=julia_env -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+      - name: Install the Jupyter kernel the pages ask for
+        run: |
+          julia --project=julia_env -e 'using IJulia; IJulia.installkernel("Julia (TrackPad — Fundamental AP)", "--project=$(pwd())/julia_env")'
+
+      # Node 22: the README records that Node 26 trips an upstream MyST
+      # HTTP-client crash after a page has built.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Check the kernel is registered under the expected name
+        run: |
+          uv run jupyter kernelspec list
+          uv run jupyter kernelspec list | grep -q 'julia-_trackpad-_-fundamental-ap_-1.12'
+
+      # BASE_URL makes every asset and link resolve under the project subpath
+      # https://msu-beam-dynamics.github.io/fundamental_AP/ rather than the root.
+      - name: Build the book
+        run: uv run jupyter-book build --html --execute --execute-parallel 1
+        env:
+          BASE_URL: /${{ github.event.repository.name }}
+
+      # Pages served from an Actions artifact never runs Jekyll, but the file
+      # costs nothing and removes any doubt about the underscore-prefixed dirs.
+      - name: Disable Jekyll processing
+        run: touch _build/html/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _build/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

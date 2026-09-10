@@ -1478,7 +1478,9 @@ version = "0.11.9"
 
 [[deps.TrackPad]]
 deps = ["Adapt", "KernelAbstractions", "LinearAlgebra", "Random", "StaticArrays", "YAML"]
-path = "/Users/haoyue/src/juliapkg/TrackPad"
+git-tree-sha1 = "2d77263f60cf6c1e71ddff3ba89872245489fbd5"
+repo-rev = "main"
+repo-url = "https://github.com/MSU-Beam-Dynamics/TrackPad.jl"
 uuid = "e7bec244-bd43-46ed-8fec-7dc091d24617"
 version = "0.1.0"
 
