@@ -1,0 +1,34 @@
+version: 1
+project:
+  title: Fundamental Accelerator Physics
+  subtitle: Lecture notes with TrackPad.jl simulations
+  authors:
+    - name: Yue Hao
+      email: haoyue@msu.edu
+      affiliations:
+        - Michigan State University
+  github: https://github.com/haoyue/fundamental_AP_JB2
+  toc:
+    - file: content/index.md
+    - title: Math Preparation
+      children:
+        - file: content/math_prep/linear_algebra.md
+        - file: content/math_prep/relativistic_mechanics.md
+        - file: content/math_prep/oscillators_vector_calculus.md
+    - title: Transverse Dynamics
+      children:
+        - file: content/transverse_dynamics/fields_multipoles_orbit.md
+        - file: content/transverse_dynamics/linear_motion_matrices.md
+        - file: content/transverse_dynamics/twiss_fodo.md
+        - file: content/transverse_dynamics/emittance.md
+        - file: content/transverse_dynamics/coupling.md
+        - file: content/transverse_dynamics/dispersion_chromaticity.md
+    - title: Longitudinal Dynamics
+      children:
+        - file: content/longitudinal_dynamics/rf_acceleration.md
+        - file: content/longitudinal_dynamics/ring_longitudinal_map.md
+        - file: content/longitudinal_dynamics/linac_dynamics.md
+site:
+  template: book-theme
+  options:
+    logo: content/images/ring_harmonic.png

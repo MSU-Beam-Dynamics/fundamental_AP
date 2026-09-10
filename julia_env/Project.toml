@@ -1,0 +1,6 @@
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+TrackPad = "e7bec244-bd43-46ed-8fec-7dc091d24617"
+TrackPadWidgets = "3f8a1c7e-64d1-4b2a-9d55-2a6c0f1b7e94"

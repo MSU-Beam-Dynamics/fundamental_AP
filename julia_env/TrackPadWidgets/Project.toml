@@ -1,0 +1,7 @@
+name = "TrackPadWidgets"
+uuid = "3f8a1c7e-64d1-4b2a-9d55-2a6c0f1b7e94"
+authors = ["Yue Hao <haoyue@msu.edu>"]
+version = "0.1.0"
+
+[compat]
+julia = "1.10"

@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Jupyter Book 2 build artifacts
+_build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS noise
+.DS_Store
