@@ -401,7 +401,7 @@ explorer(
 end
 ```
 
-Now we can insert a short dipole in the middle of a 2 meter drfit space. Launch a 2 mm bunch a metre upstream and collect them at downstream: the trajectory fan and
+Now we can insert a short quadrupole in the middle of a 2 meter drfit space. Launch a 2 mm bunch a metre upstream and collect them at downstream: the trajectory fan and
 the rms envelope give the absolute picture, and the three insets show the
 phase-space cloud at entrance, at the magnet and at exit.
 
