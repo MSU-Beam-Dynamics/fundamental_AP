@@ -316,7 +316,7 @@ explorer(
             for j in eachindex(S); push!(xs, S[j]); push!(ys, C[j][i, 1]*1e3); end
             push!(xs, nothing); push!(ys, nothing)
         end
-        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.55,
+        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.5,
              label = b == 1 ? "δ < 0" : b == NBAND ? "δ > 0" : nothing)
     end
 
