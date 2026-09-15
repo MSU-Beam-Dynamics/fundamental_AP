@@ -339,10 +339,73 @@ end
 
 
 
-### Why a sextupole fixes it
 
-A sextupole kicks as $\Delta p_x \propto -(x^2-y^2)$, which is useless on axis.
-Put it where the beam is **dispersive**, though, so that $x=x_\beta+D\delta$, and
+Both dispersion and chromaticity are inevitable in lattices containing dipoles
+and quadrupoles, and many beam-dynamics problems stem from them, so their
+control is an essential part of accelerator design. Sextupoles correct the
+chromaticity by producing another energy dependent focusing effect, but introduce nonlinearity, requiring attention to the dynamic aperture of accelerator.
+
+
+
+```{code-cell} julia
+:tags: [hide-input]
+
+using TrackPad, TrackPadWidgets, StaticArrays
+
+# The page's cell, with the bends fixed at 5° and k₁ on the knob. The sextupoles
+# are present but unpowered, so this really is the *natural* chromaticity.
+const ΘNAT = deg2rad(5.0)
+fodo_k(k) = fodo_bend(ΘNAT; k = k)
+
+δs = collect(range(-1e-2, 1e-2, length=13))
+
+"Tune at each δ, tracked from the off-momentum closed orbit."
+function tunecurve(lat)
+    qx = Float64[]; qy = Float64[]
+    for d in δs
+        o = find_closed_orbit_4d(lat, beam; dp=d)
+        t = gettune(lat, beam; reference=SVector{6,Float64}(o[1],o[2],o[3],o[4],0.0,d))
+        push!(qx, t[1]); push!(qy, t[2])
+    end
+    qx, qy
+end
+
+"Least-squares slope dQ/dδ of a tune curve — the chromaticity the plot shows."
+slope(q) = (δ̄ = sum(δs)/length(δs); q̄ = sum(q)/length(q);
+            sum((δs .- δ̄) .* (q .- q̄)) / sum((δs .- δ̄).^2))
+
+explorer(
+    title   = "Natural chromaticity of the FODO cell (dipoles at 5°, no sextupoles)",
+    sliders = [Knob("k₁ [m⁻²]", range(0.3, 1.1, length=17);
+                    fmt = k -> string(round(k;digits=2)), init = 13)],
+    # The tune moves by only a few parts in a thousand across the energy scan,
+    # so the axis has to follow the frame or the slope — the whole point — is flat.
+    panels  = [Panel(xlabel="δ_E", ylabel="tune", title="tune versus energy",
+                     autoscale=:frame, height=300, legend=:bottomleft)],
+    note = "ξ = −(1/4π)∮β(s)k(s)ds: stronger quadrupoles focus more but also chromatically "*
+           "detune more, and the cell runs out of stability just above k₁ = 1.197 m⁻². Real rings "*
+           "correct this to small positive values with sextupole families — the next "*
+           "figure. The readouts check TrackPad's getchrom against the slope of the "*
+           "curve actually plotted.",
+) do k
+    lat = Lattice(fodo_k(k); periodic=true)
+    qx, qy = tunecurve(lat)
+    ξ = getchrom(lat, beam; centered=true)
+    (series = [line(δs, qx; color=PALETTE[1], label="Qₓ"),
+               line(δs, qy; color=PALETTE[2], label="Qᵧ")],
+     readouts = ["Qₓ(0)"            => round(qx[7]; digits=4),
+                 "Qᵧ(0)"            => round(qy[7]; digits=4),
+                 "ξₓ (getchrom)"    => round(ξ[1]; digits=4),
+                 "ξᵧ (getchrom)"    => round(ξ[2]; digits=4),
+                 "dQₓ/dδ from curve" => round(slope(qx); digits=4),
+                 "dQᵧ/dδ from curve" => round(slope(qy); digits=4),
+                 "ΔQₓ over the scan" => round(maximum(qx) - minimum(qx); sigdigits=3)])
+end
+```
+
+### A sextupole is needed to fix it
+
+A sextupole kicks as $\Delta p_x \propto -(x^2-y^2)$, which does not directly introduce energy dependent kicks.  However, when placed where the beam is **dispersive**, so that $x=x_\beta+D\delta$, and
 the square produces a cross term $\propto D\,\delta\,x_\beta$ — a kick
 proportional to the betatron amplitude *and* to the momentum offset. That is a
 quadrupole whose strength tracks $\delta$, which is exactly the error the
@@ -469,75 +532,10 @@ explorer(
 end
 ```
 
-Both dispersion and chromaticity are inevitable in lattices containing dipoles
-and quadrupoles, and many beam-dynamics problems stem from them, so their
-control is an essential part of accelerator design. Sextupoles correct the
-chromaticity but introduce nonlinearity, requiring attention to the dynamic
-aperture.
 
-TrackPad computes the chromaticity by finite differences of the tune versus
-energy. Reusing the same 7 m cell as above — 0.5 m quadrupoles, 2 m dipoles,
-0.5 m drifts — with each dipole fixed at $5°$, the knob is now the quadrupole
-strength. It is the *natural* chromaticity in the sense that nothing corrects
-it: the cell has no sextupoles. Both planes come out negative at every setting,
-which is the generic result — a particle with $\delta>0$ is stiffer, the
-quadrupoles focus it less, and its tune falls.
 
-```{code-cell} julia
-:tags: [hide-input]
 
-using TrackPad, TrackPadWidgets, StaticArrays
 
-# The page's cell, with the bends fixed at 5° and k₁ on the knob. The sextupoles
-# are present but unpowered, so this really is the *natural* chromaticity.
-const ΘNAT = deg2rad(5.0)
-fodo_k(k) = fodo_bend(ΘNAT; k = k)
-
-δs = collect(range(-1e-2, 1e-2, length=13))
-
-"Tune at each δ, tracked from the off-momentum closed orbit."
-function tunecurve(lat)
-    qx = Float64[]; qy = Float64[]
-    for d in δs
-        o = find_closed_orbit_4d(lat, beam; dp=d)
-        t = gettune(lat, beam; reference=SVector{6,Float64}(o[1],o[2],o[3],o[4],0.0,d))
-        push!(qx, t[1]); push!(qy, t[2])
-    end
-    qx, qy
-end
-
-"Least-squares slope dQ/dδ of a tune curve — the chromaticity the plot shows."
-slope(q) = (δ̄ = sum(δs)/length(δs); q̄ = sum(q)/length(q);
-            sum((δs .- δ̄) .* (q .- q̄)) / sum((δs .- δ̄).^2))
-
-explorer(
-    title   = "Natural chromaticity of the FODO cell (dipoles at 5°, no sextupoles)",
-    sliders = [Knob("k₁ [m⁻²]", range(0.3, 1.1, length=17);
-                    fmt = k -> string(round(k;digits=2)), init = 13)],
-    # The tune moves by only a few parts in a thousand across the energy scan,
-    # so the axis has to follow the frame or the slope — the whole point — is flat.
-    panels  = [Panel(xlabel="δ_E", ylabel="tune", title="tune versus energy",
-                     autoscale=:frame, height=300, legend=:bottomleft)],
-    note = "ξ = −(1/4π)∮β(s)k(s)ds: stronger quadrupoles focus more but also chromatically "*
-           "detune more, and the cell runs out of stability just above k₁ = 1.197 m⁻². Real rings "*
-           "correct this to small positive values with sextupole families — the next "*
-           "figure. The readouts check TrackPad's getchrom against the slope of the "*
-           "curve actually plotted.",
-) do k
-    lat = Lattice(fodo_k(k); periodic=true)
-    qx, qy = tunecurve(lat)
-    ξ = getchrom(lat, beam; centered=true)
-    (series = [line(δs, qx; color=PALETTE[1], label="Qₓ"),
-               line(δs, qy; color=PALETTE[2], label="Qᵧ")],
-     readouts = ["Qₓ(0)"            => round(qx[7]; digits=4),
-                 "Qᵧ(0)"            => round(qy[7]; digits=4),
-                 "ξₓ (getchrom)"    => round(ξ[1]; digits=4),
-                 "ξᵧ (getchrom)"    => round(ξ[2]; digits=4),
-                 "dQₓ/dδ from curve" => round(slope(qx); digits=4),
-                 "dQᵧ/dδ from curve" => round(slope(qy); digits=4),
-                 "ΔQₓ over the scan" => round(maximum(qx) - minimum(qx); sigdigits=3)])
-end
-```
 
 ## Correcting chromaticity with two sextupole families
 
