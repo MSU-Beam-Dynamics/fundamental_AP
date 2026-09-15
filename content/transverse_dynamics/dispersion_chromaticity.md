@@ -320,13 +320,14 @@ explorer(
              label = b == 1 ? "δ < 0" : b == NBAND ? "δ > 0" : nothing)
     end
 
-    insets = [points(round.(C[j][idx, 1] .* 1e3; sigdigits=4),
-                     round.(C[j][idx, 2] .* 1e3; sigdigits=4);
-                     panel=p, color=BANDS[b], size=2.6, alpha=0.55)
-              for (p, j) in zip(2:4, (1, 3, 5))
-              for (b, idx) in enumerate([findall(==(bb), bands) for bb in 1:NBAND])]
+    # Series are painted in order, so the last one drawn sits on top. Walk the
+    # bands from red down to blue, otherwise the red end buries the blue end.
+    insets = [points(round.(C[j][findall(==(b), bands), 1] .* 1e3; sigdigits=4),
+                     round.(C[j][findall(==(b), bands), 2] .* 1e3; sigdigits=4);
+                     panel=p, color=BANDS[b], size=2.6, alpha=0.5)
+              for (p, j) in zip(2:4, (1, 3, 5)) for b in NBAND:-1:1]
 
-    (series = vcat(traj, insets),
+    (series = vcat(reverse(traj), insets),
      readouts = ["nominal f"        => string(round(f; digits=2), " m"),
                  "k₁"               => string(round(k1; digits=3), " m⁻²"),
                  "σ_δ"              => string(round(Int, σδ*100), " %"),
@@ -526,7 +527,8 @@ explorer(
     strip = lattice_strip(lattice_plot_data(sx_lattice(k2)), (-1.0, 1.0);
                           ylim=(-ytop, ytop), offset=-1.0)
 
-    (series = vcat(traj, strip,
+    # Painted last sits on top, so run the bands red → blue (see the first figure).
+    (series = vcat(reverse(traj), strip,
         [line(δmean, waist; panel=2, color="#5b6472", width=1.4)],
         [points([δmean[b]], [waist[b]]; panel=2, color=BANDS[b], size=7.0)
          for b in 1:NBAND]),
