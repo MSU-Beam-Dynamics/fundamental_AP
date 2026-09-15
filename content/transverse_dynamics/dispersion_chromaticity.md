@@ -215,12 +215,7 @@ end
 
 
 
-:::{note}
-TrackPad's sixth coordinate is $\delta_E=(E-E_0)/(P_0c)$, not
-$\delta_P=(P-P_0)/P_0$; they coincide only to first order at ultrarelativistic
-energies. `getchrom`'s legacy keyword names (`dp`, `dpp`) also refer to
-$\delta_E$.
-:::
+
 
 ## Chromaticity
 
@@ -231,6 +226,118 @@ with energy — the linear ***chromaticity*** is defined as
 $$
 \xi=\frac{d\nu}{d\delta}.
 $$
+
+Before any of that, it is worth seeing the effect on single trajectories. Send
+a nearly parallel bunch into one short focusing quadrupole and colour every
+particle by its momentum offset: the stiffer particles (red) are bent less and
+cross the axis late, the softer ones (blue) are bent more and cross early. The
+focal point is smeared along $s$, and that smear *is* the chromaticity.
+
+```{code-cell} julia
+:tags: [hide-input]
+
+using TrackPad, TrackPadWidgets, Random, Statistics
+
+const NCH   = 245                # particles, 35 per colour band
+const NBAND = 7                  # δ bands, blue (low momentum) → red (high)
+const σX    = 0.8e-3             # rms beam size at the entrance [m]
+const σPX   = 0.04e-3            # rms divergence [rad] — almost parallel
+const LQCH  = 0.1                # quadrupole length [m], centred on s = 0
+const ARM   = 1.0 - LQCH/2       # drift on each side, so s runs −1 m → +1 m
+
+# Blue → grey → red, chosen to stay legible on both book themes (a bwr ramp's
+# white middle disappears on the light background).
+const BANDS = ["#2166ac", "#4393c3", "#92c5de", "#9aa4b2", "#f4a582", "#d6604d", "#b2182b"]
+
+# One fixed draw, reused by every frame: the knob scales δ rather than redrawing
+# it, so a particle keeps its identity — and its colour — as the spread opens.
+const RNG   = MersenneTwister(7)
+const X0    = randn(RNG, NCH) .* σX
+const PX0   = randn(RNG, NCH) .* σPX
+const U     = repeat(range(-1.0, 1.0, length=NBAND), inner=NCH ÷ NBAND)  # δ/δmax
+const BANDOF = repeat(1:NBAND, inner=NCH ÷ NBAND)
+
+"Slice the line so s = −1, the quadrupole centre, and s = +1 are all boundaries."
+ch_pieces(k1) = AbstractElement[
+    Drift(ARM), Quadrupole(LQCH/2, k1), Quadrupole(LQCH/2, k1), Drift(ARM)]
+
+"Track every particle, keeping x and pₓ at each of the five boundaries."
+function ch_track(k1, δmax)
+    c = zeros(NCH, 6)
+    c[:, 1] .= X0; c[:, 2] .= PX0; c[:, 6] .= U .* δmax
+    flags = zeros(Int, NCH)
+    S = Float64[-1.0]; C = [copy(c)]
+    for e in ch_pieces(k1)
+        linepass!(c, Lattice(AbstractElement[e]), beam, flags)
+        push!(S, S[end] + get_length(e)); push!(C, copy(c))
+    end
+    S, C
+end
+
+FOCAL  = [0.5, 0.7, 1.0]                              # nominal focal length [m]
+SPREAD = [0.0, 0.05, 0.10, 0.15, 0.20]                # δ half-width
+
+explorer(
+    title   = "One quadrupole, one bunch: the focal point smears with momentum",
+    sliders = [Knob("δ half-width", SPREAD;
+                    fmt = d -> string("±", round(Int, d*100), "%"), init = 5),
+               Knob("focal length [m]", FOCAL;
+                    fmt = f -> string(round(f; digits=2)), init = 2)],
+    panels  = [Panel(xlabel="s [m]", ylabel="x [mm]",
+                     title="trajectories, coloured by momentum offset",
+                     xlim=(-1.0, 1.0), ylim=(-3.0, 3.0), height=320,
+                     legend=:bottomleft, basis="100%"),
+               Panel(title="(x, pₓ) at s = −1 m", autoscale=:frame, share="chr",
+                     height=175, basis="31%", minwidth=150, ticklabels=false),
+               Panel(title="(x, pₓ) at the quadrupole", autoscale=:frame, share="chr",
+                     height=175, basis="31%", minwidth=150, ticklabels=false),
+               Panel(title="(x, pₓ) at s = +1 m", autoscale=:frame, share="chr",
+                     height=175, basis="31%", minwidth=150, ticklabels=false)],
+    note = "Every particle enters with the same optics and differs only in momentum. "*
+           "TrackPad applies the same pₓ kick to all of them — it is the drift that "*
+           "divides by (1+δ), so the stiffer particles turn through a smaller angle and "*
+           "focus further downstream. Set the spread to zero and the whole fan collapses "*
+           "to one focal point; open it and the point becomes a segment. The three "*
+           "insets share one x/pₓ box so the clouds can be compared directly.",
+) do δmax, f
+    k1 = 1/(f*LQCH)
+    S, C = ch_track(k1, δmax)
+
+    # One polyline per colour band, particles separated by a pen lift.
+    traj = map(1:NBAND) do b
+        xs = Union{Float64,Nothing}[]; ys = Union{Float64,Nothing}[]
+        for i in findall(==(b), BANDOF)
+            for j in eachindex(S)
+                push!(xs, S[j]); push!(ys, C[j][i, 1]*1e3)
+            end
+            push!(xs, nothing); push!(ys, nothing)
+        end
+        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.55,
+             label = b == 1 ? "δ < 0" : b == NBAND ? "δ > 0" : nothing)
+    end
+
+    insets = [points(round.(C[j][idx, 1] .* 1e3; sigdigits=4),
+                     round.(C[j][idx, 2] .* 1e3; sigdigits=4);
+                     panel=p, color=BANDS[b], size=2.6, alpha=0.55)
+              for (p, j) in zip(2:4, (1, 3, 5))
+              for (b, idx) in enumerate([findall(==(bb), BANDOF) for bb in 1:NBAND])]
+
+    xend = [C[end][i, 1] for i in 1:NCH]
+    (series = vcat(traj,
+        [line([-LQCH/2, -LQCH/2, nothing, LQCH/2, LQCH/2], [-3.0, 3.0, nothing, -3.0, 3.0];
+              panel=1, color="#9aa4b2", dash=true, width=1, label="quadrupole")],
+        insets),
+     readouts = ["nominal f"        => string(round(f; digits=2), " m"),
+                 "k₁"               => string(round(k1; digits=3), " m⁻²"),
+                 "δ half-width"     => string("±", round(Int, δmax*100), " %"),
+                 "σₓ at entrance"   => string(round(std(C[1][:,1])*1e3; sigdigits=3), " mm"),
+                 "σₓ at s = +1 m"   => string(round(std(xend)*1e3; sigdigits=3), " mm"),
+                 "focus of δ = −δmax" => string(round(f*(1-δmax); sigdigits=3), " m"),
+                 "focus of δ = +δmax" => string(round(f*(1+δmax); sigdigits=3), " m")])
+end
+```
+
+
 
 Both dispersion and chromaticity are inevitable in lattices containing dipoles
 and quadrupoles, and many beam-dynamics problems stem from them, so their

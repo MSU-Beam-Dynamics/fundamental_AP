@@ -51,11 +51,13 @@ $$
 \end{bmatrix}.
 $$
 
-However, it is not necessary that the beam is matched to the lattice.  The calculation of the $\sigma$-matrix and the emittance is valid for any distribution of particles in phase space. 
+However, it is not necessary that the beam is matched to the lattice.  In this case, the twiss parameter only reflects the shape/orientation of the beam distribution in the phase space.  The emittance calculated is usually refered as the geometric emittance. 
 
-One can prove that the emittance is an invariant of linear transport, meaning that it does not change as the beam propagates through a linear lattice.
+However, the lattice design may have an alternative shape and orientation, charecterized by the lattice twiss parameter, as it is only determined by the lattice structure and not by the beam properties. One may calculate another beam emittance, sometimes referred as the effective emittance, to characterize the phase space area needed to accomodate the mismatched beam.
 
-However, the if the beam is not matched the lattice, the effective emittance will vary along the lattice.
+One can prove that both the geometric emittance and the effective emittance are invariants of linear transport, meaning that they do not change as the beam propagates through a linear lattice.
+
+
 
 
 ## Emittance through a FODO cell
@@ -275,28 +277,9 @@ explorer(
 end
 ```
 
-Three readings are worth taking.
+From the above example, we can see that:
 
-**Both emittances are invariant.** The two ratios $\epsilon/\epsilon(0)$ hold at
-1 to about a part in $10^{4}$ from station to station, and the residue is the
-thick-quadrupole integrator rather than physics. That is true of
-$\epsilon_{\text{rms}}$, which is a property of the distribution, *and* of
-$\epsilon_{100\%}$, which is the largest single-particle action
-$\gamma x^2+2\alpha xx'+\beta x'^2$ measured against the lattice — each
-particle's action is conserved, so the biggest one is too.
+**Both emittances are invariant.**, which mismatch presents, the effective emittance is larger than the geometric emittance, and the lattice ellipse has to be inflated to hold the same particles.
 
-**Mismatch moves the size, not the area.** Turning either knob changes
-$\sigma_x$ everywhere — read it off the readouts — and leaves
-$\epsilon_{\text{rms}}$ at 200.5 nm·rad in every one of the twelve settings: a
-badly matched beam is not a lower-quality beam, it is the same beam in the wrong
-shape. What mismatch *does* cost is the 100 % ellipse, whose curve lifts from
-2313 to 33538 nm·rad as the beam is thrown further from the periodic solution.
 
-**The two ellipses are answering different questions.** Matched, they are
-concentric and similar, and $\epsilon_{100\%}/\epsilon_{\text{rms}}\approx12$ —
-just the tail of a Gaussian, since $\epsilon_i/2\epsilon_{\text{rms}}$ is
-exponentially distributed and the maximum of $N$ draws grows like $\ln N$.
-Mismatched, the beam ellipse tilts away from the lattice ellipse, and the
-lattice ellipse has to inflate — up to 167 times the rms area at the far corner
-of the two knobs — to enclose the same particles. The rms number is what you quote; the lattice
-ellipse is what has to fit through the aperture.
+**\%100 emittance** only make sense when the beam distribution is truncated.  For a real Gaussian beam, the effective emittance is infinite.  In practice, one may define a certain percentage of the beam distribution to be covered in the lattice ellipse, e.g. 90\%, 95\%, 99\%, etc.  
