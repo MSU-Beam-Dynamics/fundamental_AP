@@ -316,7 +316,7 @@ explorer(
             for j in eachindex(S); push!(xs, S[j]); push!(ys, C[j][i, 1]*1e3); end
             push!(xs, nothing); push!(ys, nothing)
         end
-        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.5,
+        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.2,
              label = b == 1 ? "δ < 0" : b == NBAND ? "δ > 0" : nothing)
     end
 
@@ -324,7 +324,7 @@ explorer(
     # bands from red down to blue, otherwise the red end buries the blue end.
     insets = [points(round.(C[j][findall(==(b), bands), 1] .* 1e3; sigdigits=4),
                      round.(C[j][findall(==(b), bands), 2] .* 1e3; sigdigits=4);
-                     panel=p, color=BANDS[b], size=2.6, alpha=0.5)
+                     panel=p, color=BANDS[b], size=2.6, alpha=0.2)
               for (p, j) in zip(2:4, (1, 3, 5)) for b in NBAND:-1:1]
 
     (series = vcat(reverse(traj), insets),
@@ -513,7 +513,7 @@ explorer(
             for j in eachindex(S); push!(xs, S[j]); push!(ys, C[j][i, 1]*1e3); end
             push!(xs, nothing); push!(ys, nothing)
         end
-        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.5,
+        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.2,
              label = b == 1 ? "δ < 0" : b == NBAND ? "δ > 0" : nothing)
     end
 
