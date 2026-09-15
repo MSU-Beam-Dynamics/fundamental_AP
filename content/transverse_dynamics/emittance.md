@@ -74,84 +74,126 @@ using StaticArrays, TrackPad, TrackPadWidgets, Random, Statistics, LinearAlgebra
 
 beam = Beam(3.0e9)
 
+# Column layout of a TrackPad coordinate array: (x, pₓ, y, p_y, z, δE).
+const IX, IPX = 1, 2
+
 # The same FODO cell as the previous chapter: 4 m period, ℓq = 0.5 m, f ≈ 1.8 m.
-const L_cell, f_eff, ℓq = 4.0, 1.8, 0.5
-const kq   = 1/(f_eff*ℓq)
-const NPE  = 400            # particles in the cloud
-const EPS0 = 200e-9         # geometric emittance at the entrance [m·rad]
+const CELL_LENGTH  = 4.0
+const FOCAL_LENGTH = 1.8
+const QUAD_LENGTH  = 0.5
+const QUAD_STRENGTH = 1/(FOCAL_LENGTH * QUAD_LENGTH)
 
-# Slice the cell so the optics are sampled inside the magnets too: 2 slices per
-# quadrupole and 8 per drift give 20 pieces, hence 21 observation stations.
+const N_PARTICLES    = 400        # particles in the cloud
+const EMITTANCE_IN   = 200e-9     # geometric emittance at the entrance [m·rad]
+
+"""
+    fodo_slices()
+
+The cell cut into 20 pieces — 2 per quadrupole, 8 per drift — so the optics and
+the cloud are recorded at 21 stations, inside the magnets as well as between
+them. Slicing changes only where things are observed, never the optics.
+"""
 function fodo_slices()
-    p = AbstractElement[]
-    append!(p, [Quadrupole(ℓq/2, +kq) for _ in 1:2])
-    append!(p, [Drift((L_cell - 2ℓq)/2/8) for _ in 1:8])
-    append!(p, [Quadrupole(ℓq/2, -kq) for _ in 1:2])
-    append!(p, [Drift((L_cell - 2ℓq)/2/8) for _ in 1:8])
-    p
+    drift_slice = (CELL_LENGTH - 2*QUAD_LENGTH)/2/8
+    return AbstractElement[
+        [Quadrupole(QUAD_LENGTH/2, +QUAD_STRENGTH) for _ in 1:2]...,
+        [Drift(drift_slice)                        for _ in 1:8]...,
+        [Quadrupole(QUAD_LENGTH/2, -QUAD_STRENGTH) for _ in 1:2]...,
+        [Drift(drift_slice)                        for _ in 1:8]...,
+    ]
 end
 
-ringE = Lattice(fodo_slices(); periodic=true)
-twE   = periodic_twiss(ringE, beam)              # β, α at all 21 station boundaries
-const βM, αM = twE.betax[1], twE.alphax[1]       # matched values at the cell start
+lattice = Lattice(fodo_slices(); periodic=true)
+optics  = periodic_twiss(lattice, beam)        # β, α at all 21 station boundaries
 
-"Track the bunch piece by piece, keeping the full coordinate array at each boundary."
+# The matched values at the cell start, which the knobs deliberately depart from.
+const BETA_MATCHED  = optics.betax[1]
+const ALPHA_MATCHED = optics.alphax[1]
+
+"""
+    track_cloud(pieces, coords0)
+
+Track the bunch piece by piece, keeping the full coordinate array at every
+boundary. Returns `(s, states)`.
+"""
 function track_cloud(pieces, coords0)
-    c = copy(coords0); flags = zeros(Int, size(c, 1))
-    S = Float64[0.0]; C = [copy(c)]
-    for e in pieces
-        linepass!(c, Lattice(AbstractElement[e]), beam, flags)
-        push!(S, S[end] + get_length(e)); push!(C, copy(c))
+    coords = copy(coords0)
+    lost   = zeros(Int, size(coords, 1))
+    s      = [0.0]
+    states = [copy(coords)]
+    for element in pieces
+        linepass!(coords, Lattice(AbstractElement[element]), beam, lost)
+        push!(s, s[end] + get_length(element))
+        push!(states, copy(coords))
     end
-    S, C
+    return s, states
 end
 
-"Beam matrix Σ of the cloud and its rms emittance √det Σ."
-function sigma_matrix(c)
-    x, xp = c[:, 1], c[:, 2]
-    Σ = [var(x) cov(x, xp); cov(x, xp) var(xp)]
-    Σ, sqrt(max(det(Σ), 0.0))
+"""
+    beam_matrix(state)
+
+The 2×2 beam matrix Σ = [⟨x²⟩ ⟨xx′⟩; ⟨xx′⟩ ⟨x′²⟩] of the cloud, and the rms
+emittance √det Σ that goes with it. This is the beam describing ITSELF — no
+lattice enters.
+"""
+function beam_matrix(state)
+    x  = state[:, IX]
+    xp = state[:, IPX]
+    Σ  = [var(x)      cov(x, xp)
+          cov(x, xp)  var(xp)]
+    return Σ, sqrt(max(det(Σ), 0.0))
 end
 
-"Single-particle emittances εᵢ = γx² + 2αxx′ + βx′², measured against the LATTICE."
-function lattice_emittances(c, β, α)
+"""
+    single_particle_actions(state, β, α)
+
+εᵢ = γx² + 2αxx′ + βx′² for every particle, measured against the LATTICE
+ellipse rather than against the beam's own. The largest of these is the
+emittance the aperture actually has to accommodate.
+"""
+function single_particle_actions(state, β, α)
     γ = (1 + α^2)/β
-    [γ*c[i,1]^2 + 2α*c[i,1]*c[i,2] + β*c[i,2]^2 for i in axes(c, 1)]
+    return [γ*state[i, IX]^2 + 2α*state[i, IX]*state[i, IPX] + β*state[i, IPX]^2
+            for i in axes(state, 1)]
 end
 
-"The 1σ ellipse of the distribution: uᵀΣ⁻¹u = 1, area π·ε_rms."
-function sigma_ellipse(Σ; np = 97)
-    Lc = cholesky(Symmetric(Σ)).L
-    θ  = range(0, 2π, length=np)
-    p  = [Lc * [cos(t), sin(t)] for t in θ]
-    [q[1] for q in p], [q[2] for q in p]
+"The 1σ ellipse of the distribution itself: the curve uᵀΣ⁻¹u = 1."
+function beam_ellipse(Σ; npoints = 97)
+    L = cholesky(Symmetric(Σ)).L       # maps the unit circle onto the 1σ ellipse
+    θ = range(0, 2π, length=npoints)
+    pts = [L * [cos(t), sin(t)] for t in θ]
+    return [p[1] for p in pts], [p[2] for p in pts]
 end
 
 "The lattice ellipse γx² + 2αxx′ + βx′² = ε, oriented by the lattice, not the beam."
-function twiss_ellipse(β, α, ε; np = 97)
-    θ = range(0, 2π, length=np)
-    (@. sqrt(ε*β)*cos(θ)), (@. -sqrt(ε/β)*(α*cos(θ) + sin(θ)))
+function lattice_ellipse(β, α, ε; npoints = 97)
+    θ = range(0, 2π, length=npoints)
+    x  = @. sqrt(ε*β) * cos(θ)
+    xp = @. -sqrt(ε/β) * (α*cos(θ) + sin(θ))
+    return x, xp
 end
 
-r4e(v) = round.(v; sigdigits=4)
-STATIONS = 0:20
+"Round plot data to 4 significant digits — finer than a screen pixel."
+plotdata(v) = round.(v; sigdigits=4)
+
 # s of each station, so the knob can be labelled in metres rather than by index.
-const SGRID = vcat(0.0, cumsum([get_length(e) for e in fodo_slices()]))
+const STATION_S = vcat(0.0, cumsum([get_length(e) for e in fodo_slices()]))
 
 # The beamline band across the top of the emittance panel, built from TrackPad's
-# backend-independent glyph data. Drawn from the UNSLICED cell so each magnet is
-# one box rather than one per integration slice.
-const YMAX  = 42000.0        # top-panel range, leaving the band its own room
-BEAMLINE = lattice_strip(
+# backend-independent glyph data. Drawn from the UNSLICED cell, so each magnet is
+# one box rather than one box per integration slice.
+const PANEL_TOP = 42000.0        # top-panel range, leaving the band its own room
+const BEAMLINE = lattice_strip(
     lattice_plot_data(Lattice(AbstractElement[
-        Quadrupole(ℓq, +kq), Drift((L_cell - 2ℓq)/2),
-        Quadrupole(ℓq, -kq), Drift((L_cell - 2ℓq)/2)]; periodic=true)),
-    L_cell; ymax=YMAX)
+        Quadrupole(QUAD_LENGTH, +QUAD_STRENGTH), Drift((CELL_LENGTH - 2*QUAD_LENGTH)/2),
+        Quadrupole(QUAD_LENGTH, -QUAD_STRENGTH), Drift((CELL_LENGTH - 2*QUAD_LENGTH)/2)];
+        periodic=true)),
+    CELL_LENGTH; ymax=PANEL_TOP)
 
 explorer(
     title   = "Two ellipses: the beam's own, and the one the lattice must hold",
-    sliders = [Knob("position in FODO cell", STATIONS;
-                    fmt = n -> string(round(SGRID[n+1]; digits=3), " m"), init = 1),
+    sliders = [Knob("position in FODO cell", 0:20;
+                    fmt = n -> string(round(STATION_S[n+1]; digits=3), " m"), init = 1),
                Knob("β₀ / β_match", [0.5, 1.0, 1.5];
                     fmt = r -> string(round(r; digits=2)), init = 2),
                Knob("α₀ − α_match", [-2.0, -1.0, 0.0, 1.0];
@@ -161,7 +203,7 @@ explorer(
     panels  = [Panel(xlabel="s [m]", ylabel="ε₁₀₀% from the lattice [nm·rad]",
                      y2label="ε_rms from Σ [nm·rad]",
                      title="both emittances along the cell",
-                     ylim=(0.0, YMAX), y2lim=(0.0, 400.0), height=270,
+                     ylim=(0.0, PANEL_TOP), y2lim=(0.0, 400.0), height=270,
                      legend=:bottomleft, basis="100%"),
                Panel(xlabel="x [mm]", ylabel="x′ [mrad]",
                      title="phase space at the selected station",
@@ -176,47 +218,60 @@ explorer(
            "ellipse, not the rms one, that has to fit through the aperture. The band "*
            "along the top of the first panel is the cell itself: QF above the line, QD "*
            "below, drift on it.",
-) do n, ratio, dα
-    c0 = matched_gaussian(MersenneTwister(2024), NPE,
-                          optics4DUC(βM*ratio, αM + dα, βM*ratio, αM + dα);
-                          emitx=EPS0, emity=EPS0, emitz=1e-9, betaz=0.2)
-    S, C = track_cloud(fodo_slices(), c0)
+) do station, beta_ratio, alpha_offset
+    entrance = optics4DUC(BETA_MATCHED*beta_ratio, ALPHA_MATCHED + alpha_offset,
+                          BETA_MATCHED*beta_ratio, ALPHA_MATCHED + alpha_offset)
+    bunch = matched_gaussian(MersenneTwister(2024), N_PARTICLES, entrance;
+                             emitx=EMITTANCE_IN, emity=EMITTANCE_IN,
+                             emitz=1e-9, betaz=0.2)
 
-    σx    = [std(c[:, 1]) for c in C] .* 1e3
-    εrms  = [sigma_matrix(c)[2] for c in C] .* 1e9
-    ε100  = [maximum(lattice_emittances(C[j], twE.betax[j], twE.alphax[j]))
-             for j in eachindex(C)] .* 1e9
+    s, states = track_cloud(fodo_slices(), bunch)
 
-    j     = n + 1
-    Σ, εr = sigma_matrix(C[j])
-    βl, αl = twE.betax[j], twE.alphax[j]
-    εi    = lattice_emittances(C[j], βl, αl)
-    εmax  = maximum(εi)
+    # The two emittances along the whole cell. ε_rms is the beam's own area and
+    # is invariant; ε₁₀₀ is measured against the lattice and is invariant too,
+    # but only because the lattice ellipse rotates with the beam.
+    rms_curve      = [beam_matrix(state)[2] for state in states] .* 1e9
+    envelope_curve = [maximum(single_particle_actions(states[j],
+                                                      optics.betax[j], optics.alphax[j]))
+                      for j in eachindex(states)] .* 1e9
 
-    ex, ep = sigma_ellipse(Σ)
-    tx, tp = twiss_ellipse(βl, αl, εmax)
+    # Everything below refers to the one station the knob selects.
+    j = station + 1
+    Σ, rms_emittance = beam_matrix(states[j])
+    β_here, α_here   = optics.betax[j], optics.alphax[j]
+    actions          = single_particle_actions(states[j], β_here, α_here)
+    largest_action   = maximum(actions)
+
+    beam_x,    beam_xp    = beam_ellipse(Σ)
+    lattice_x, lattice_xp = lattice_ellipse(β_here, α_here, largest_action)
 
     (series = [
-        line(r4e(S), r4e(ε100); panel=1, color=PALETTE[4], width=2.0,
-             label="ε₁₀₀% (left)"),
-        line(r4e(S), r4e(εrms); panel=1, color=PALETTE[2], width=2.0, axis=:right,
-             label="ε_rms (right)"),
-        line([S[j], S[j]], [0.0, YMAX*0.91]; panel=1, color="#9aa4b2", width=1.4),
-        points(r4e(C[j][:,1] .* 1e3), r4e(C[j][:,2] .* 1e3); panel=2, color=PALETTE[1],
+        line(plotdata(s), plotdata(envelope_curve); panel=1, color=PALETTE[4],
+             width=2.0, label="ε₁₀₀% (left)"),
+        line(plotdata(s), plotdata(rms_curve); panel=1, color=PALETTE[2],
+             width=2.0, axis=:right, label="ε_rms (right)"),
+        line([s[j], s[j]], [0.0, PANEL_TOP*0.91]; panel=1, color="#9aa4b2", width=1.4),
+        points(plotdata(states[j][:, IX]  .* 1e3),
+               plotdata(states[j][:, IPX] .* 1e3); panel=2, color=PALETTE[1],
                size=2.4, alpha=0.4, label="particles"),
-        line(r4e(ex .* 1e3), r4e(ep .* 1e3); panel=2, color=PALETTE[2], dash=true,
-             width=2.0, label="1σ ellipse from Σ (ε_rms)"),
-        line(r4e(tx .* 1e3), r4e(tp .* 1e3); panel=2, color=PALETTE[4],
-             width=2.0, label="lattice ellipse at max action (100 %)")],
-     readouts = ["s"              => string(round(S[j]; digits=2), " m"),
-                 "σₓ"             => string(round(σx[j]; sigdigits=4), " mm"),
-                 "ε_rms"          => string(round(εr*1e9; sigdigits=5), " nm·rad"),
-                 "ε_100%"         => string(round(εmax*1e9; sigdigits=5), " nm·rad"),
-                 "ε_100% / ε_rms" => round(εmax/εr; digits=2),
-                 "ε_rms / ε_rms(0)"   => round(εr*1e9/εrms[1]; digits=6),
-                 "ε_100% / ε_100%(0)" => round(εmax*1e9/ε100[1]; digits=6),
-                 "lattice β, α"   => string(round(βl; digits=3), " m, ", round(αl; digits=3)),
-                 "particles held" => string(count(<=(εmax + 1e-18), εi), "/", NPE)])
+        line(plotdata(beam_x .* 1e3), plotdata(beam_xp .* 1e3); panel=2,
+             color=PALETTE[2], dash=true, width=2.0,
+             label="1σ ellipse from Σ (ε_rms)"),
+        line(plotdata(lattice_x .* 1e3), plotdata(lattice_xp .* 1e3); panel=2,
+             color=PALETTE[4], width=2.0,
+             label="lattice ellipse at max action (100 %)")],
+     readouts = ["s"              => string(round(s[j]; digits=2), " m"),
+                 "σₓ"             => string(round(std(states[j][:, IX])*1e3; sigdigits=4), " mm"),
+                 "ε_rms"          => string(round(rms_emittance*1e9; sigdigits=5), " nm·rad"),
+                 "ε_100%"         => string(round(largest_action*1e9; sigdigits=5), " nm·rad"),
+                 "ε_100% / ε_rms" => round(largest_action/rms_emittance; digits=2),
+                 # Both ratios stay at 1: each emittance is separately conserved.
+                 "ε_rms / ε_rms(0)"   => round(rms_emittance*1e9/rms_curve[1]; digits=6),
+                 "ε_100% / ε_100%(0)" => round(largest_action*1e9/envelope_curve[1]; digits=6),
+                 "lattice β, α"   => string(round(β_here; digits=3), " m, ",
+                                            round(α_here; digits=3)),
+                 "particles held" => string(count(<=(largest_action + 1e-18), actions),
+                                            "/", N_PARTICLES)])
 end
 ```
 

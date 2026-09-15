@@ -137,35 +137,49 @@ together:
 
 using LinearAlgebra, TrackPadWidgets
 
-θc = range(0, 2π, length=121)
-cxs, cys = cos.(θc), sin.(θc)
+# The unit circle, as the list of points we will push through the matrix.
+angles      = range(0, 2π, length=121)
+circle_x    = cos.(angles)
+circle_y    = sin.(angles)
 
 explorer(
     title   = "A 2×2 matrix as a linear map",
     sliders = [Knob("off-diagonal b", range(-2.5, 2.5, length=41);
                     fmt = b -> string(round(b; digits=2)), init = 24)],
     panels  = [Panel(xlabel="x", ylabel="y", title="unit circle → A·(circle)",
-                     xlim=(-4.0,4.0), ylim=(-4.0,4.0), equal=true, height=280, legend=:bottomleft)],
-    statics = [line(cxs, cys; color="#9aa4b2", dash=true, label="unit circle")],
+                     xlim=(-4.0,4.0), ylim=(-4.0,4.0), equal=true, height=280,
+                     legend=:bottomleft)],
+    statics = [line(circle_x, circle_y; color="#9aa4b2", dash=true, label="unit circle")],
     note = "The eigenvectors are the only directions the map does not rotate — it just "*
            "stretches them by their eigenvalue. Every other radius of the circle both "*
            "rotates and stretches, tracing the ellipse.",
 ) do b
-    A = [2.0 b; b 3.0]
-    pts = [A*[cxs[i], cys[i]] for i in eachindex(cxs)]
-    ex = [p[1] for p in pts]; ey = [p[2] for p in pts]
-    λ, X = eigen(A)
-    arrows = Any[]
-    for k in 1:2
-        v = λ[k]*X[:,k]
-        push!(arrows, line([0.0, v[1]], [0.0, v[2]]; color=PALETTE[k+2], width=2.5,
-                           label="λ$k · eigenvector $k"))
-    end
-    (series = vcat([line(ex, ey; color=PALETTE[1], label="A·(circle)")], arrows),
-     readouts = ["A" => "[2 $(round(b;digits=2)); $(round(b;digits=2)) 3]",
-                 "λ₁" => round(λ[1]; digits=3),
-                 "λ₂" => round(λ[2]; digits=3),
-                 "Tr A" => round(tr(A); digits=3),
+    A = [2.0  b
+         b    3.0]
+
+    # Send every point of the circle through A; the image is an ellipse.
+    image      = [A * [circle_x[i], circle_y[i]] for i in eachindex(circle_x)]
+    ellipse_x  = [p[1] for p in image]
+    ellipse_y  = [p[2] for p in image]
+
+    eigenvalues, eigenvectors = eigen(A)
+
+    # Draw each eigenvector scaled by its own eigenvalue, so the arrow tip lands
+    # exactly on the ellipse: that is what "A only stretches this direction" means.
+    eigen_arrows = [
+        let tip = eigenvalues[k] * eigenvectors[:, k]
+            line([0.0, tip[1]], [0.0, tip[2]]; color=PALETTE[k+2], width=2.5,
+                 label="λ$k · eigenvector $k")
+        end
+        for k in 1:2
+    ]
+
+    (series = vcat([line(ellipse_x, ellipse_y; color=PALETTE[1], label="A·(circle)")],
+                   eigen_arrows),
+     readouts = ["A"     => "[2 $(round(b;digits=2)); $(round(b;digits=2)) 3]",
+                 "λ₁"    => round(eigenvalues[1]; digits=3),
+                 "λ₂"    => round(eigenvalues[2]; digits=3),
+                 "Tr A"  => round(tr(A); digits=3),
                  "det A" => round(det(A); digits=3)])
 end
 ```

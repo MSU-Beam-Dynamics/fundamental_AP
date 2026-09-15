@@ -88,58 +88,90 @@ by the Twiss parameters at the observation point.
 
 using LinearAlgebra, TrackPadWidgets
 
-# Every knob multiplies the frame count, and each frame carries its own copy of
-# the ellipse, so the grid is deliberately small: 21 turns × 3 × 3 × 5 = 945 frames.
-const NTURN = 30
-const θE    = range(0, 2π, length=33)     # the invariant ellipse, drawn once per frame
-r4t(v) = round.(v; sigdigits=4)           # 4 digits is finer than a pixel here
+# Every knob multiplies the frame count and each frame carries its own copy of
+# the ellipse, so the grid is deliberately small: 31 turns × 3 × 3 × 6 frames.
+const MAX_TURN = 30
+const ELLIPSE_ANGLES = range(0, 2π, length=33)
+
+"Round plot data to 4 significant digits — finer than a screen pixel, and it
+ keeps the data embedded in the page small."
+plotdata(v) = round.(v; sigdigits=4)
+
+"""
+    twiss_matrix(β, α, Φ)
+
+The one-turn map written in Twiss form. Its determinant is 1 and its trace is
+2cos Φ for any (β, α), which is the whole point of the parametrisation.
+"""
+function twiss_matrix(β, α, Φ)
+    γ = (1 + α^2)/β
+    return [cos(Φ) + α*sin(Φ)    β*sin(Φ)
+           -γ*sin(Φ)             cos(Φ) - α*sin(Φ)]
+end
+
+"The Courant–Snyder invariant 2J = γx² + 2αxx′ + βx′², halved."
+action(x, xp, β, α) = ((1 + α^2)/β * x^2 + 2α*x*xp + β*xp^2) / 2
+
+"The ellipse of constant action J for the lattice (β, α), as (x, x′) arrays."
+function invariant_ellipse(β, α, J)
+    x  = @. sqrt(2J*β) * cos(ELLIPSE_ANGLES)
+    xp = @. -sqrt(2J/β) * (α*cos(ELLIPSE_ANGLES) + sin(ELLIPSE_ANGLES))
+    return x, xp
+end
 
 explorer(
     title   = "A Twiss-form one-turn map preserves its own ellipse",
     # `turn` is the first knob, so the ▶ play button walks the particle around
     # the ellipse; drag it by hand to step turn by turn.
-    sliders = [Knob("turn", 0:NTURN; fmt = n -> string(n), init = 9),
-               # β below 2 would throw the α = ±2 orbit off the ±3.2 axis, since the
-               # x′ amplitude of the ellipse through (1, 0) is (1+α²)/β.
-               Knob("β [m]", [2.0, 5.0, 10.0]; fmt = b -> string(round(b;digits=2)), init = 2),
-               Knob("α", [-2.0, 0.0, 2.0]; fmt = a -> string(round(a;digits=2)), init = 2),
-               Knob("Φ [deg]", [30, 45, 60, 71, 90, 120]; fmt = p -> string(Int(round(p))), init = 2)],
-    panels  = [Panel(xlabel="x", ylabel="x′", title="turn-by-turn motion on the invariant ellipse",
+    sliders = [Knob("turn", 0:MAX_TURN; fmt = n -> string(n), init = 9),
+               # β below 2 would throw the α = ±2 orbit off the ±3.5 axis, since
+               # the x′ amplitude of the ellipse through (1, 0) is (1+α²)/β.
+               Knob("β [m]", [2.0, 5.0, 10.0]; fmt = b -> string(round(b; digits=2)), init = 2),
+               Knob("α", [-2.0, 0.0, 2.0];     fmt = a -> string(round(a; digits=2)), init = 2),
+               Knob("Φ [deg]", [30, 45, 60, 71, 90, 120];
+                    fmt = p -> string(Int(round(p))), init = 2)],
+    panels  = [Panel(xlabel="x", ylabel="x′",
+                     title="turn-by-turn motion on the invariant ellipse",
                      # `equal` would stretch the wider axis to match pixel aspect —
                      # about ±7 in x on a full-width panel — so the x limit only
                      # holds with it off. x and x′ carry different units anyway.
                      xlim=(-3.5,3.5), ylim=(-3.5,3.5), height=340,
                      legend=:bottomleft)],
-    note = "Matrix has det M = 1, for any (β, α): the ellipse shape change, the particle will remain on the same ellipse.",
-) do n, βt, αt, Φdeg
-    Φ  = deg2rad(Φdeg)
-    γt = (1+αt^2)/βt
-    M  = [cos(Φ)+αt*sin(Φ)  βt*sin(Φ); -γt*sin(Φ)  cos(Φ)-αt*sin(Φ)]
+    note = "det M = 1 for any (β, α): changing the knobs reshapes the ellipse, but the "*
+           "particle never leaves the one it started on.",
+) do turn, β, α, Φ_deg
+    Φ = deg2rad(Φ_deg)
+    M = twiss_matrix(β, α, Φ)
 
-    # Iterate from (1, 0) and keep the whole history up to the selected turn.
-    v = [1.0, 0.0]
-    xs = Float64[v[1]]; ps = Float64[v[2]]
-    for _ in 1:n
-        v = M*v
-        push!(xs, v[1]); push!(ps, v[2])
+    # Launch at (1, 0) and apply the map `turn` times, keeping the whole history.
+    position = [1.0, 0.0]
+    xs = [position[1]]
+    xps = [position[2]]
+    for _ in 1:turn
+        position = M * position
+        push!(xs, position[1])
+        push!(xps, position[2])
     end
 
-    J  = (γt*xs[1]^2 + 2αt*xs[1]*ps[1] + βt*ps[1]^2)/2
-    ex = @. sqrt(2J*βt)*cos(θE); ep = @. -(αt*cos(θE)+sin(θE))*sqrt(2J/βt)
-    Jn = (γt*xs[end]^2 + 2αt*xs[end]*ps[end] + βt*ps[end]^2)/2
+    # The ellipse is fixed by the action of the STARTING point; every later turn
+    # must land on it, which is what the figure demonstrates.
+    J = action(xs[1], xps[1], β, α)
+    ellipse_x, ellipse_xp = invariant_ellipse(β, α, J)
 
-    (series = [line(r4t(ex), r4t(ep); color="#9aa4b2", dash=true, label="invariant ellipse"),
-               # turns 1 … n−1: where the particle has already been
-               points(r4t(xs[2:max(1, end-1)]), r4t(ps[2:max(1, end-1)]);
-                      color=PALETTE[1], size=3.0, alpha=0.25, label="past turns"),
-               # the start, always on the plot
+    # Turns 1 … n−1 are drawn faint as "where the particle has already been";
+    # `max(1, end-1)` keeps the range empty rather than negative at turn 0.
+    past_x  = xs[2:max(1, end-1)]
+    past_xp = xps[2:max(1, end-1)]
+
+    (series = [line(plotdata(ellipse_x), plotdata(ellipse_xp); color="#9aa4b2",
+                    dash=true, label="invariant ellipse"),
+               points(plotdata(past_x), plotdata(past_xp); color=PALETTE[1],
+                      size=3.0, alpha=0.25, label="past turns"),
                points([1.0], [0.0]; color=PALETTE[4], size=6.0, label="start (1, 0)"),
-               # where the particle is now
-               points(r4t([xs[end]]), r4t([ps[end]]); color=PALETTE[2], size=6.5,
-                      label="turn $n")],
-     readouts = ["turn"        => n,
-                 "phase nΦ"    => string(round(mod(n*Φdeg, 360); digits=1), "°"),
-                 ])
+               points(plotdata([xs[end]]), plotdata([xps[end]]); color=PALETTE[2],
+                      size=6.5, label="turn $turn")],
+     readouts = ["turn"     => turn,
+                 "phase nΦ" => string(round(mod(turn*Φ_deg, 360); digits=1), "°")])
 end
 ```
 
@@ -200,24 +232,38 @@ In the following interactive example the $L_1/f$ knob scans the thin length quad
 
 using LinearAlgebra, TrackPadWidgets
 
-nper = 40
-θe = range(0, 2π, length=121)
+const N_PERIODS = 40                      # how many cells the orbit is iterated through
+const CIRCLE = range(0, 2π, length=121)
 
-"The thin-lens cell ½QF–O–QD–O–½QF as a 2×2 map; only the ratio L₁/f matters."
-function mfodo(u)
-    f, L1  = 1.0, u
-    halfQF = [1.0 0.0; -1/(2f) 1.0]
-    QD     = [1.0 0.0;  1/f    1.0]
-    O      = [1.0 L1;   0.0    1.0]
-    halfQF * O * QD * O * halfQF
+"""
+    fodo_matrix(ratio)
+
+The thin-lens cell ½QF – O – QD – O – ½QF as a 2×2 map, where `ratio` = L₁/f.
+Only that ratio matters, so f is fixed at 1 and the drift length carries it.
+Matrices multiply right to left, i.e. in the reverse of the order the particle
+meets the elements — here the cell is a palindrome, so it reads the same.
+"""
+function fodo_matrix(ratio)
+    f, L1  = 1.0, ratio
+    half_QF = [1.0     0.0
+              -1/(2f)  1.0]
+    QD      = [1.0     0.0
+               1/f     1.0]
+    drift   = [1.0     L1
+               0.0     1.0]
+    return half_QF * drift * QD * drift * half_QF
 end
 
-# Trace and tune across the whole scan, drawn once behind every frame. The cell
-# is a palindrome, so M₁₁ = M₂₂ and the matched α is zero at this point; the
-# tune is real only while |Tr M| ≤ 2, and NaN elsewhere lifts the pen.
-ufine  = collect(range(0.05, 2.1, length=205))
-trfine = [(M = mfodo(u); M[1,1] + M[2,2]) for u in ufine]
-qfine  = [abs(t) <= 2 ? acos(t/2)/2π : NaN for t in trfine]
+trace_of(M) = M[1,1] + M[2,2]
+
+"Phase advance per cell from the trace; real only inside the stable band."
+phase_advance(trace) = abs(trace) <= 2 ? acos(trace/2) : NaN
+
+# The trace and tune across the whole scan, drawn once behind every frame. NaN
+# outside the stable band lifts the pen rather than drawing a spurious line.
+scan_ratio = collect(range(0.05, 2.1, length=205))
+scan_trace = [trace_of(fodo_matrix(u)) for u in scan_ratio]
+scan_tune  = [phase_advance(t)/2π for t in scan_trace]
 
 explorer(
     title   = "Thin-lens FODO cell ½QF–O–QD–O–½QF, iterated",
@@ -235,53 +281,61 @@ explorer(
                      title="phase-space orientation at the cell centre",
                      xlim=(-1.5, 1.5), ylim=(-0.6, 0.6), height=250,
                      legend=:bottomleft)],
-    statics = [line(cos.(θe), sin.(θe); panel=1, color="#9aa4b2", dash=true, label="|λ| = 1"),
+    statics = [line(cos.(CIRCLE), sin.(CIRCLE); panel=1, color="#9aa4b2", dash=true,
+                    label="|λ| = 1"),
                line([-3, 3], [0, 0]; panel=1, color="#9aa4b2", width=1, alpha=0.5),
-               line(ufine, trfine; panel=3, color=PALETTE[1], width=2.0, label="Tr M (left)"),
-               line(ufine, qfine;  panel=3, color=PALETTE[2], width=2.0, axis=:right,
-                    label="Q (right)"),
+               line(scan_ratio, scan_trace; panel=3, color=PALETTE[1], width=2.0,
+                    label="Tr M (left)"),
+               line(scan_ratio, scan_tune;  panel=3, color=PALETTE[2], width=2.0,
+                    axis=:right, label="Q (right)"),
                line([0.0, 2.15, NaN, 0.0, 2.15], [2.0, 2.0, NaN, -2.0, -2.0];
                     panel=3, color=PALETTE[4], dash=true, width=1.4, label="|Tr M| = 2")],
     note = "Stable ⇔ |Tr M| ≤ 2 ⇔ both eigenvalues sit on the unit circle — the same "*
            "M_FODO derived above. The cell is a palindrome, so M₁₁ = M₂₂ and the matched "*
            "α is exactly zero here: the ellipse never tilts, it only flattens as the tune "*
            "climbs towards the half-integer at L₁/f = 2.",
-) do u
-    M  = mfodo(u)
-    tr = M[1,1] + M[2,2]
-    λ  = eigvals(complex(M))
+) do ratio
+    M      = fodo_matrix(ratio)
+    trace  = trace_of(M)
+    λ      = eigvals(complex(M))
+    stable = abs(trace) <= 2
 
-    v = [1.0, 0.0]; xs = Float64[v[1]]; ps = Float64[v[2]]
-    for _ in 1:nper
-        v = M * v
-        push!(xs, v[1]); push!(ps, v[2])
+    # Iterate the map from (1, 0) and keep the x history, one point per cell.
+    position = [1.0, 0.0]
+    xs  = [position[1]]
+    xps = [position[2]]
+    for _ in 1:N_PERIODS
+        position = M * position
+        push!(xs, position[1])
+        push!(xps, position[2])
     end
 
-    stable = abs(tr) <= 2
-    col = stable ? PALETTE[1] : PALETTE[4]
-    Q   = stable ? acos(tr/2)/2π : NaN
+    Φ = phase_advance(trace)
+    Q = Φ/2π
+    colour = stable ? PALETTE[1] : PALETTE[4]
 
-    # Matched ellipse through the launch point (1, 0). α* = 0 by symmetry, so
-    # β* = M₁₂/sin Φ sets the aspect and nothing sets a tilt.
-    βs  = stable ? M[1,2]/sin(acos(tr/2)) : NaN
-    ellipse = stable ?
-        [line(cos.(θe), -sin.(θe) ./ βs; panel=4, color="#9aa4b2", dash=true,
-              label="matched ellipse")] : []
+    # Matched ellipse through the launch point (1, 0). The cell is symmetric, so
+    # α* = 0 and β* = M₁₂/sin Φ sets the aspect ratio with nothing to tilt it.
+    β_match = stable ? M[1,2]/sin(Φ) : NaN
+    matched_ellipse = stable ?
+        [line(cos.(CIRCLE), -sin.(CIRCLE) ./ β_match; panel=4, color="#9aa4b2",
+              dash=true, label="matched ellipse")] : []
 
     (series = vcat(
-        [points(real.(λ), imag.(λ); panel=1, color=col, size=6.0, label="λ₊, λ₋"),
-         line(0:nper, xs; panel=2, color=col, label="xₙ"),
-         line([u, u], [-2.8, 2.8]; panel=3, color="#9aa4b2", width=1.4),
-         points([u], [tr]; panel=3, color=PALETTE[1], size=5.5),
-         points([u], [stable ? Q : NaN]; panel=3, color=PALETTE[2], size=5.5, axis=:right)],
-        ellipse,
-        [points(xs, ps; panel=4, color=col, size=3.0, alpha=0.55, label="turn-by-turn"),
+        [points(real.(λ), imag.(λ); panel=1, color=colour, size=6.0, label="λ₊, λ₋"),
+         line(0:N_PERIODS, xs; panel=2, color=colour, label="xₙ"),
+         line([ratio, ratio], [-2.8, 2.8]; panel=3, color="#9aa4b2", width=1.4),
+         points([ratio], [trace]; panel=3, color=PALETTE[1], size=5.5),
+         points([ratio], [Q];     panel=3, color=PALETTE[2], size=5.5, axis=:right)],
+        matched_ellipse,
+        [points(xs, xps; panel=4, color=colour, size=3.0, alpha=0.55,
+                label="turn-by-turn"),
          points([1.0], [0.0]; panel=4, color=PALETTE[4], size=6.0, label="start (1, 0)")]),
-     readouts = ["Tr M"    => round(tr; digits=3),
+     readouts = ["Tr M"    => round(trace; digits=3),
                  "|λ|max"  => round(maximum(abs.(λ)); digits=4),
-                 "Φ/cell"  => stable ? string(round(rad2deg(acos(tr/2)); digits=1), "°") : "—",
+                 "Φ/cell"  => stable ? string(round(rad2deg(Φ); digits=1), "°") : "—",
                  "tune Q"  => stable ? string(round(Q; digits=4)) : "—",
-                 "β* [m]"  => stable ? string(round(βs; sigdigits=4)) : "—",
+                 "β* [m]"  => stable ? string(round(β_match; sigdigits=4)) : "—",
                  "α*"      => stable ? "0 (symmetry point)" : "—",
                  "verdict" => stable ? "stable" : "unstable"])
 end
@@ -305,18 +359,25 @@ using StaticArrays, TrackPad, CairoMakie
 
 # Reference beam for every tracking cell on this page. Defined at top level, in
 # the first cell that needs it, so the later cells share it.
-beam = Beam(3.0e9)                        # 3 GeV kinetic-energy electron
+beam = Beam(3.0e9)                          # 3 GeV kinetic energy, electron
 
-L_cell, f_eff, L_q = 4.0, 1.8, 0.4         # cell length, focal length, quad length [m]
+const CELL_LENGTH  = 4.0                    # one FODO period [m]
+const FOCAL_LENGTH = 1.8                    # the thin lens the thick quad imitates [m]
+const QUAD_LENGTH  = 0.4                    # [m]
 
-# Thick quads approximating the thin lens f: k·L_q ≈ 1/f. The cell holds *two*
-# quadrupoles, so each drift is (L_cell − 2L_q)/2 and the period is exactly L_cell.
-kq = 1/(f_eff*L_q)
+# A thin lens of focal length f becomes a thick quadrupole of the same integrated
+# strength when k·ℓ = 1/f.
+quad_strength = 1/(FOCAL_LENGTH * QUAD_LENGTH)
+
+# The cell holds TWO quadrupoles, so each drift is (cell − 2ℓ_q)/2 and the period
+# comes out at exactly CELL_LENGTH.
+drift_length = (CELL_LENGTH - 2*QUAD_LENGTH)/2
+
 ring = Lattice(AbstractElement[
-    Quadrupole(L_q, +kq; name=:QF),
-    Drift((L_cell - 2L_q)/2),
-    Quadrupole(L_q, -kq; name=:QD),
-    Drift((L_cell - 2L_q)/2),
+    Quadrupole(QUAD_LENGTH, +quad_strength; name=:QF),
+    Drift(drift_length),
+    Quadrupole(QUAD_LENGTH, -quad_strength; name=:QD),
+    Drift(drift_length),
 ]; name=:FODO, periodic=true)
 
 # By default the optics come back at element boundaries only — five points for
@@ -324,21 +385,23 @@ ring = Lattice(AbstractElement[
 # keywords slice the lattice for optics: `sample_integrator_steps` splits thick
 # multipoles at their integration steps (10 per quadrupole here) and `max_step`
 # caps the length of drift and bend pieces.
-tw = periodic_twiss(ring, beam; sample_integrator_steps=true, max_step=0.05)
-println("tunex = ", tw.tunex, "   tuney = ", tw.tuney)
-println("optics sampled at ", length(tw.s), " points over ", round(tw.s[end]; digits=2), " m")
+twiss = periodic_twiss(ring, beam; sample_integrator_steps=true, max_step=0.05)
 
-# analytic thin-lens prediction for comparison
-Φ_analytic = 2asin((L_cell/2)/(2*f_eff))
-println("phase advance/cell: TrackPad = ", round(tw.tunex*2π; digits=4),
-        " rad ; thin-lens model = ", round(Φ_analytic; digits=4), " rad")
+println("tunex = ", twiss.tunex, "   tuney = ", twiss.tuney)
+println("optics sampled at ", length(twiss.s), " points over ",
+        round(twiss.s[end]; digits=2), " m")
 
-# Translucent glyphs, so the beamline reads as a background band and never
-# hides a curve that dips into it. Unlisted element kinds fall back to :element.
+# The thin-lens prediction sin(Φ/2) = L₁/(2f), with L₁ the half-cell length.
+phase_advance_thin_lens = 2asin((CELL_LENGTH/2)/(2*FOCAL_LENGTH))
+println("phase advance/cell: TrackPad = ", round(twiss.tunex*2π; digits=4),
+        " rad ; thin-lens model = ", round(phase_advance_thin_lens; digits=4), " rad")
+
+# Translucent glyphs, so the beamline reads as a background band and never hides
+# a curve that dips into it. Unlisted element kinds fall back to :element.
 const STRIP_COLORS = Dict{Symbol,Any}(
-    :quadrupole => (:seagreen,    0.55),
+    :quadrupole => (:seagreen,  0.55),
     :bend       => (:steelblue, 0.55),
-    :sextupole  => (:tomato,  0.55),
+    :sextupole  => (:tomato,    0.55),
     :rf_cavity  => (:goldenrod, 0.55),
     :element    => (:gray,      0.45),
 )
@@ -349,9 +412,9 @@ const STRIP_COLORS = Dict{Symbol,Any}(
 One axis carrying both the curves and the beamline. `plot_lattice!` draws the
 element glyphs inside the box, in a band across the top `strip` fraction of it:
 focusing quadrupoles above the band's midline, defocusing below, drifts left to
-the baseline. The y range is set to `[0, a]` with
+the baseline. The y range is set to `[0, top]` with
 
-    a = datamax / (1 - strip - headroom)
+    top = datamax / (1 - strip - headroom)
 
 so the band always has room of its own above the data, separated from it by
 `headroom`. Returns `(fig, ax)`; draw into `ax` afterwards, so the curves land
@@ -361,21 +424,24 @@ function twiss_figure(lat, datamax; figsize=(800, 380), ylabel="", title="",
                       strip=0.09, headroom=0.10)
     fig = Figure(size=figsize)
     ax  = Axis(fig[1, 1]; xlabel="s [m]", ylabel, title)
-    a   = datamax / (1 - strip - headroom)
-    # band spans [a(1−strip), a]: baseline on its midline, glyphs ±height about it
-    plot_lattice!(ax, lat; baseline=a*(1 - strip/2), height=a*strip/2,
+    top = datamax / (1 - strip - headroom)
+
+    # The band spans [top(1−strip), top]: baseline on its midline, glyphs ±height.
+    plot_lattice!(ax, lat; baseline=top*(1 - strip/2), height=top*strip/2,
                   colors=STRIP_COLORS)
-    # plot_lattice! sets limits to suit the strip alone; restore ours afterwards
+
+    # plot_lattice! sets limits to suit the strip alone; restore ours afterwards.
     xlims!(ax, 0, total_length(lat))
-    ylims!(ax, 0, a)
+    ylims!(ax, 0, top)
     return fig, ax
 end
 
-βmax = maximum(max.(tw.betax, tw.betay))
-fig, ax = twiss_figure(ring, βmax; ylabel="β [m]", title="FODO cell Twiss functions")
-lines!(ax, tw.s, tw.betax; linewidth=2, label="βₓ")
-lines!(ax, tw.s, tw.betay; linewidth=2, label="βᵧ")
-axislegend(ax; position=:rb)          # top of the box now belongs to the beamline
+beta_max = maximum(max.(twiss.betax, twiss.betay))
+fig, ax = twiss_figure(ring, beta_max; ylabel="β [m]",
+                       title="FODO cell Twiss functions")
+lines!(ax, twiss.s, twiss.betax; linewidth=2, label="βₓ")
+lines!(ax, twiss.s, twiss.betay; linewidth=2, label="βᵧ")
+axislegend(ax; position=:rb)      # the top of the box now belongs to the beamline
 fig
 ```
 
@@ -391,11 +457,12 @@ This is the alternating-gradient principle, visible directly below the magnets t
 ```{code-cell} julia
 :tags: [hide-input]
 
-# phase advances accumulate monotonically around the ring:
-μmax = max(maximum(tw.mux), maximum(tw.muy))
-fig, ax = twiss_figure(ring, μmax; ylabel="betatron phase [rad]")
-lines!(ax, tw.s, tw.mux; linewidth=2, label="μₓ")
-lines!(ax, tw.s, tw.muy; linewidth=2, label="μᵧ")
+# The betatron phase accumulates monotonically, fastest where β is smallest —
+# that is the statement dμ/ds = 1/β. Over one period it climbs to 2πQ.
+phase_max = max(maximum(twiss.mux), maximum(twiss.muy))
+fig, ax = twiss_figure(ring, phase_max; ylabel="betatron phase [rad]")
+lines!(ax, twiss.s, twiss.mux; linewidth=2, label="μₓ")
+lines!(ax, twiss.s, twiss.muy; linewidth=2, label="μᵧ")
 axislegend(ax; position=:rb)
 fig
 ```

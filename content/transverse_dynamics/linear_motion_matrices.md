@@ -187,41 +187,66 @@ length or strength, and watch the image ellipse and its determinant:
 
 using LinearAlgebra, TrackPadWidgets
 
-drift(L) = [1.0 L; 0.0 1.0]
-dipole(L, ρ) = [cos(L/ρ) ρ*sin(L/ρ); -sin(L/ρ)/ρ cos(L/ρ)]
-function quadrupole(L, k)
-    if k > 0
-        q = sqrt(k); return [cos(q*L) sin(q*L)/q; -q*sin(q*L) cos(q*L)]
-    elseif k < 0
-        q = sqrt(-k); return [cosh(q*L) sinh(q*L)/q; q*sinh(q*L) cosh(q*L)]
-    else
-        return drift(L)
-    end
+# The three 2×2 maps of the text, written out as plain matrices acting on (x, x′).
+drift_matrix(L) = [1.0  L
+                   0.0  1.0]
+
+sector_bend_matrix(L, ρ) = [ cos(L/ρ)       ρ*sin(L/ρ)
+                            -sin(L/ρ)/ρ     cos(L/ρ)]
+
+"Thick quadrupole: trigonometric when focusing (k > 0), hyperbolic when not."
+function quadrupole_matrix(L, k)
+    k == 0 && return drift_matrix(L)
+    q = sqrt(abs(k))
+    return k > 0 ? [ cos(q*L)      sin(q*L)/q
+                    -q*sin(q*L)    cos(q*L)] :
+                   [ cosh(q*L)     sinh(q*L)/q
+                     q*sinh(q*L)   cosh(q*L)]
 end
 
-θc = range(0, 2π, length=91)
-cxs, cys = cos.(θc), sin.(θc)
-KINDS = [("drift", 1), ("dipole", 2), ("quadrupole", 3)]
+# The unit circle in (x, x′), the set of starting conditions we map.
+angles   = range(0, 2π, length=91)
+circle_x = cos.(angles)
+circle_y = sin.(angles)
+
+# Each element reads the knob differently, so each says how to turn the knob
+# value `u` into a matrix and into a label.
+ELEMENTS = [
+    (name  = "drift",
+     build = u -> drift_matrix(u),
+     label = u -> "drift(L=$(round(u; digits=2)))"),
+    (name  = "dipole",
+     build = u -> sector_bend_matrix(u, 1.5),
+     label = u -> "dipole(L=$(round(u; digits=2)), ρ=1.5)"),
+    (name  = "quadrupole",
+     # The knob spans 0.1 … 3, remapped to k = −2 … +10 so one slider sweeps
+     # from defocusing, through a drift at k = 0, to strongly focusing.
+     build = u -> quadrupole_matrix(0.3, 4u - 2),
+     label = u -> "quadrupole(L=0.3, k=$(round(4u - 2; digits=2)))"),
+]
 
 explorer(
     title   = "Drift, dipole and quadrupole are all just 2×2 matrices",
-    sliders = [Knob("element", 1:3; fmt = i -> KINDS[i][1]),
+    sliders = [Knob("element", eachindex(ELEMENTS); fmt = i -> ELEMENTS[i].name),
                Knob("length / strength", range(0.1, 3.0, length=25);
                     fmt = u -> string(round(u; digits=2)), init = 13)],
     panels  = [Panel(xlabel="x", ylabel="x′", title="unit circle → M·(circle)",
                      xlim=(-3.2,3.2), ylim=(-3.2,3.2), equal=true, height=300)],
-    statics = [line(cxs, cys; color="#9aa4b2", dash=true, label="unit circle")],
+    statics = [line(circle_x, circle_y; color="#9aa4b2", dash=true, label="unit circle")],
     note = "det M = 1 for all three — every one of these elements is symplectic.",
-) do kind, u
-    M = kind == 1 ? drift(u) : kind == 2 ? dipole(u, 1.5) : quadrupole(0.3, u*4 - 2)
-    pts = [M*[cxs[i], cys[i]] for i in eachindex(cxs)]
-    ex = [p[1] for p in pts]; ey = [p[2] for p in pts]
-    label = kind == 1 ? "drift(L=$(round(u;digits=2)))" :
-            kind == 2 ? "dipole(L=$(round(u;digits=2)), ρ=1.5)" :
-                        "quadrupole(L=0.3, k=$(round(u*4-2;digits=2)))"
-    (series = [line(ex, ey; color=PALETTE[kind], label=label)],
-     readouts = ["m₁₁" => round(M[1,1]; digits=3), "m₁₂" => round(M[1,2]; digits=3),
-                 "m₂₁" => round(M[2,1]; digits=3), "m₂₂" => round(M[2,2]; digits=3),
+) do i, u
+    element = ELEMENTS[i]
+    M       = element.build(u)
+
+    image     = [M * [circle_x[j], circle_y[j]] for j in eachindex(circle_x)]
+    ellipse_x = [p[1] for p in image]
+    ellipse_y = [p[2] for p in image]
+
+    (series = [line(ellipse_x, ellipse_y; color=PALETTE[i], label=element.label(u))],
+     readouts = ["m₁₁"   => round(M[1,1]; digits=3),
+                 "m₁₂"   => round(M[1,2]; digits=3),
+                 "m₂₁"   => round(M[2,1]; digits=3),
+                 "m₂₂"   => round(M[2,2]; digits=3),
                  "det M" => round(det(M); digits=6)])
 end
 ```
@@ -235,18 +260,56 @@ Now reproduce the same physics with TrackPad's tracking engine: launch an ensemb
 using StaticArrays, TrackPad, CairoMakie, Random, Statistics, TrackPadWidgets
 
 # Reference beam for every tracking cell and widget on this page. Defined at top
-# level, in the first cell that needs it, so that later cells share it and the
-# page keeps working whatever order the cells are executed in.
-beam = Beam(3.0e9)
+# level, in the first cell that needs it, so later cells share it and the page
+# keeps working whatever order the cells are executed in.
+beam = Beam(3.0e9)                   # 3 GeV kinetic energy, electron by default
 
-NPSHEAR   = 1000                              # particles in the shear demo
-entrance0 = optics4DUC(1.0, 0.0, 1.0, 0.0)
-coords0   = matched_gaussian(
-    MersenneTwister(1234), NPSHEAR, entrance0;
-    emitx=20e-9,
-    emity=20e-9,
-    emitz=1e-6,
-    betaz=0.2,
+# Column layout of a TrackPad coordinate array: (x, pₓ, y, p_y, z, δE).
+const IX, IPX, IY, IPY = 1, 2, 3, 4
+
+"""
+    track_and_record(pieces, beam, coords0)
+
+Track the bunch `coords0` through `pieces` one element at a time, saving the
+full coordinate array after every element.
+
+Returns `(s, states)`: `s[i]` is the distance from the start of the line and
+`states[i]` is a copy of the `nparticle × 6` array there. Cutting a magnet into
+several short `pieces` is what gives a smooth curve *inside* the magnet —
+`linepass!` on its own only reports the exit.
+"""
+function track_and_record(pieces, beam, coords0)
+    coords = copy(coords0)
+    lost   = zeros(Int, size(coords, 1))
+    s      = [0.0]
+    states = [copy(coords)]
+    for element in pieces
+        linepass!(coords, Lattice(AbstractElement[element]), beam, lost)
+        push!(s, s[end] + get_length(element))
+        push!(states, copy(coords))
+    end
+    return s, states
+end
+
+"Coordinate `col` of particle `i` at every recorded station."
+trajectory(states, i, col) = [state[i, col] for state in states]
+
+"Round plot data to 4 significant digits — finer than a screen pixel, and it
+ keeps the data embedded in the page small."
+plotdata(v) = round.(v; sigdigits=4)
+
+# ---------------------------------------------------------------------------
+# The shear demo: one bunch, one drift, nothing else.
+# ---------------------------------------------------------------------------
+const N_SHEAR = 1000                        # particles
+
+entrance_optics = optics4DUC(1.0, 0.0, 1.0, 0.0)     # βₓ, αₓ, βᵧ, αᵧ
+bunch_at_entrance = matched_gaussian(
+    MersenneTwister(1234), N_SHEAR, entrance_optics;
+    emitx = 20e-9,
+    emity = 20e-9,
+    emitz = 1e-6,
+    betaz = 0.2,
 )
 
 explorer(
@@ -256,22 +319,29 @@ explorer(
     panels  = [Panel(xlabel="x [mm]", ylabel="pₓ [mrad]", title="Phase space",
                      height=380, legend=:bottomright)],
     # The entrance cloud does not depend on the knob, so it is drawn once.
-    statics = [points(coords0[:, 1] .* 1e3, coords0[:, 2] .* 1e3;
+    statics = [points(bunch_at_entrance[:, IX]  .* 1e3,
+                      bunch_at_entrance[:, IPX] .* 1e3;
                       color="#808000", size=2.2, alpha=0.3,
                       label="initial distribution")],
     note = "x grows by x′·L while pₓ is untouched: the cloud shears, but its " *
            "area — the emittance — never changes.",
 ) do L
-    c = copy(coords0)
-    linepass!(c, Lattice(AbstractElement[Drift(L)]), beam, zeros(Int, NPSHEAR))
-    x, px = c[:, 1], c[:, 2]
-    ε = sqrt(var(x) * var(px) - cov(x, px)^2)          # rms emittance, invariant
+    bunch = copy(bunch_at_entrance)
+    linepass!(bunch, Lattice(AbstractElement[Drift(L)]), beam, zeros(Int, N_SHEAR))
+
+    x  = bunch[:, IX]
+    px = bunch[:, IPX]
+
+    # rms emittance ε = √(⟨x²⟩⟨pₓ²⟩ − ⟨xpₓ⟩²) — the area of the cloud, which the
+    # shear cannot change.
+    emittance = sqrt(var(x)*var(px) - cov(x, px)^2)
+
     (series = [points(x .* 1e3, px .* 1e3; color="#1e90ff", size=2.2, alpha=0.3,
                       label="after $(round(Int, L)) m")],
-     readouts = ["σₓ"            => string(round(std(x) * 1e3;  sigdigits=3), " mm"),
+     readouts = ["σₓ"            => string(round(std(x)  * 1e3; sigdigits=3), " mm"),
                  "σₚₓ"           => string(round(std(px) * 1e3; sigdigits=3), " mrad"),
                  "⟨x pₓ⟩"        => string(round(cov(x, px) * 1e6; sigdigits=3), " mm·mrad"),
-                 "rms emittance" => string(round(ε * 1e9; sigdigits=4), " nm·rad")])
+                 "rms emittance" => string(round(emittance * 1e9; sigdigits=4), " nm·rad")])
 end
 ```
 Now we can see how particle envelope evolves in a drift space.  You will note how different initial condition matters in their evolution:
@@ -281,58 +351,83 @@ Now we can see how particle envelope evolves in a drift space.  You will note ho
 
 using Random, Statistics, StaticArrays, TrackPad, TrackPadWidgets
 
-const Ldrift = 2.0                            # drift length [m]
-const NP     = 300                            # particles per frame
-const σ0     = sqrt(100.0 * 20e-9)            # 1.414 mm — entrance rms size, held fixed
-BETAS  = 10.0 .^ range(2, 0, length=5)        # 100 → 1 m, geometric
-ALPHAS = collect(range(100.0, 0.0, length=5)) # 100 → 0
-sgrid  = collect(range(0.0, Ldrift, length=41))
+const DRIFT_LENGTH = 2.0                       # [m]
+const N_PARTICLES  = 300                       # per frame
+const SIGMA_START  = sqrt(100.0 * 20e-9)       # 1.414 mm, the entrance rms size
+
+# β₀ spans two decades geometrically; α₀ runs from strongly converging to a waist
+# at the entrance.
+BETA_CHOICES  = 10.0 .^ range(2, 0, length=5)        # 100 → 1 m
+ALPHA_CHOICES = collect(range(100.0, 0.0, length=5)) # 100 → 0
+
+# Where the rms envelope is evaluated. A drift is linear, so the envelope can be
+# computed analytically from the entrance cloud — no tracking needed.
+envelope_s = collect(range(0.0, DRIFT_LENGTH, length=41))
 
 explorer(
     title   = "A drift acting on a matched bunch of fixed entrance size",
-    sliders = [Knob("β₀ [m]", BETAS; fmt = b -> string(round(b; sigdigits=3)), init = 1),
-               Knob("α₀", ALPHAS; fmt = a -> string(round(a; digits=1)), init = 1)],
+    sliders = [Knob("β₀ [m]", BETA_CHOICES;  fmt = b -> string(round(b; sigdigits=3)), init = 1),
+               Knob("α₀",     ALPHA_CHOICES; fmt = a -> string(round(a; digits=1)),    init = 1)],
     panels  = [Panel(xlabel="s [m]", ylabel="x [mm]", title="trajectories through the drift",
                      autoscale=:frame, height=270, legend=:bottomleft),
                Panel(xlabel="x [mm]", ylabel="pₓ [mrad]", title="phase space",
                      autoscale=:frame, height=270, legend=:bottomleft)],
-    note = "The meaning of beta and alpha function will be explained later.  The beam size at begining is fixed.  as beta function changes, the 'beam quality' changes accordingly.",
-) do β0, α0
-    ε = σ0^2 / β0                             # holds σₓ(0) = √(β₀ε) at σ₀ for every β₀
-    entrance = optics4DUC(β0, α0, β0, α0)     # (βₓ, αₓ, βᵧ, αᵧ) — the two planes match
-    c0 = matched_gaussian(MersenneTwister(1234), NP, entrance;
-                          emitx=ε, emity=ε, emitz=1e-9, betaz=0.2)
-    cL = copy(c0)
-    linepass!(cL, Lattice(AbstractElement[Drift(Ldrift)]), beam, zeros(Int, NP))
+    note = "The meaning of the beta and alpha functions is explained in the next chapter. "*
+           "Here the entrance beam size is held fixed, so changing β₀ changes the beam "*
+           "quality — the emittance — rather than the spot.",
+) do β₀, α₀
+    # Pinning the entrance size means the emittance is no longer free: it follows
+    # from σ₀ = √(β₀ε).
+    emittance = SIGMA_START^2 / β₀
 
-    # In a drift x(s) = x₀ + s·pₓ₀, so one segment per particle draws the whole fan.
-    tx = Union{Float64,Nothing}[]; ty = Union{Float64,Nothing}[]
-    for i in 1:NP
-        push!(tx, 0.0);     push!(ty, c0[i,1]*1e3)
-        push!(tx, Ldrift);  push!(ty, cL[i,1]*1e3)
-        push!(tx, nothing); push!(ty, nothing)      # lift the pen between particles
+    entrance = optics4DUC(β₀, α₀, β₀, α₀)      # the two planes are set up identically
+    bunch_in = matched_gaussian(MersenneTwister(1234), N_PARTICLES, entrance;
+                                emitx=emittance, emity=emittance,
+                                emitz=1e-9, betaz=0.2)
+
+    bunch_out = copy(bunch_in)
+    linepass!(bunch_out, Lattice(AbstractElement[Drift(DRIFT_LENGTH)]),
+              beam, zeros(Int, N_PARTICLES))
+
+    # In a drift x(s) = x₀ + s·pₓ₀, so each particle's path is a straight line and
+    # two points draw it exactly. `nothing` lifts the pen between particles.
+    fan_s = Union{Float64,Nothing}[]
+    fan_x = Union{Float64,Nothing}[]
+    for i in 1:N_PARTICLES
+        push!(fan_s, 0.0);           push!(fan_x, bunch_in[i,  IX] * 1e3)
+        push!(fan_s, DRIFT_LENGTH);  push!(fan_x, bunch_out[i, IX] * 1e3)
+        push!(fan_s, nothing);       push!(fan_x, nothing)
     end
 
-    # rms envelope measured from the ensemble itself — no optics functions needed
-    env = [std(c0[:,1] .+ s .* c0[:,2]) * 1e3 for s in sgrid]
-    iw  = argmin(env)
+    # The envelope, measured from the ensemble rather than from optics functions:
+    # propagate every particle to s by hand and take the standard deviation.
+    envelope = [std(bunch_in[:, IX] .+ s .* bunch_in[:, IPX]) * 1e3 for s in envelope_s]
+    waist    = argmin(envelope)
 
-    (series = [line(tx, ty; panel=1, color=PALETTE[1], width=0.8, alpha=0.18,
+    # Closed forms to check the measurement against, both consequences of holding
+    # σ₀ fixed: the waist depth depends only on α₀, its position on both knobs.
+    waist_size_formula = SIGMA_START * 1e3 / sqrt(1 + α₀^2)
+    waist_s_formula    = α₀ * β₀ / (1 + α₀^2)
+    divergence         = SIGMA_START * 1e3 * sqrt(1 + α₀^2) / β₀
+
+    (series = [line(fan_s, fan_x; panel=1, color=PALETTE[1], width=0.8, alpha=0.18,
                     label="particles"),
-               line(sgrid,  env; panel=1, color=PALETTE[4], width=2.0, label="±σₓ(s)"),
-               line(sgrid, -env; panel=1, color=PALETTE[4], width=2.0),
-               points(c0[:,1].*1e3, c0[:,2].*1e3; panel=2, color=PALETTE[1],
-                      size=2.2, alpha=0.45, label="entrance"),
-               points(cL[:,1].*1e3, cL[:,2].*1e3; panel=2, color=PALETTE[2],
-                      size=2.2, alpha=0.45, label="after $(Ldrift) m")],
-     readouts = ["ε = σ₀²/β₀"    => string(round(ε; sigdigits=3), " m·rad"),
-                 "σₓ at entrance" => string(round(env[1];   sigdigits=3), " mm"),
-                 "σₓ at exit"     => string(round(env[end]; sigdigits=3), " mm"),
-                 "waist σₓ"       => string(round(env[iw];  sigdigits=3), " mm"),
-                 "σ₀/√(1+α₀²)"    => string(round(σ0*1e3/sqrt(1+α0^2); sigdigits=3), " mm"),
-                 "waist at s"     => string(round(sgrid[iw]; digits=2), " m"),
-                 "α₀β₀/(1+α₀²)"   => string(round(α0*β0/(1+α0^2); digits=2), " m"),
-                 "σₓ′ = √(γ₀ε)"   => string(round(σ0*1e3*sqrt(1+α0^2)/β0; sigdigits=3), " mrad")])
+               line(envelope_s,  envelope; panel=1, color=PALETTE[4], width=2.0,
+                    label="±σₓ(s)"),
+               line(envelope_s, -envelope; panel=1, color=PALETTE[4], width=2.0),
+               points(bunch_in[:, IX]  .* 1e3, bunch_in[:, IPX]  .* 1e3; panel=2,
+                      color=PALETTE[1], size=2.2, alpha=0.45, label="entrance"),
+               points(bunch_out[:, IX] .* 1e3, bunch_out[:, IPX] .* 1e3; panel=2,
+                      color=PALETTE[2], size=2.2, alpha=0.45,
+                      label="after $(DRIFT_LENGTH) m")],
+     readouts = ["ε = σ₀²/β₀"     => string(round(emittance; sigdigits=3), " m·rad"),
+                 "σₓ at entrance" => string(round(envelope[1];     sigdigits=3), " mm"),
+                 "σₓ at exit"     => string(round(envelope[end];   sigdigits=3), " mm"),
+                 "waist σₓ"       => string(round(envelope[waist]; sigdigits=3), " mm"),
+                 "σ₀/√(1+α₀²)"    => string(round(waist_size_formula; sigdigits=3), " mm"),
+                 "waist at s"     => string(round(envelope_s[waist]; digits=2), " m"),
+                 "α₀β₀/(1+α₀²)"   => string(round(waist_s_formula; digits=2), " m"),
+                 "σₓ′ = √(γ₀ε)"   => string(round(divergence; sigdigits=3), " mrad")])
 end
 ```
 
@@ -350,22 +445,20 @@ focal point, and the same magnet that focuses in $x$ defocuses in $y$:
 ```{code-cell} julia
 :tags: [hide-input]
 
-using TrackPadWidgets
+using TrackPad, TrackPadWidgets
+# `beam`, `track_and_record`, `trajectory` and `IX`/`IY` come from the cell above.
 
-"Track a bunch element by element, recording x and y at every boundary."
-function track_s(pieces, beam, coords0)
-    c = copy(coords0); flags = zeros(Int, size(c, 1))
-    S = Float64[0.0]; X = [copy(c[:, 1])]; Y = [copy(c[:, 3])]
-    for e in pieces
-        linepass!(c, Lattice(AbstractElement[e]), beam, flags)
-        push!(S, S[end] + get_length(e))
-        push!(X, copy(c[:, 1])); push!(Y, copy(c[:, 3]))
-    end
-    S, reduce(hcat, X), reduce(hcat, Y)
-end
+const L_QUAD    = 0.3                 # quadrupole length [m]
+const S_QUAD    = (0.5, 0.8)          # where it sits along the line, for the marker
+const N_SLICES  = 6                   # slices, so the ray bends smoothly inside it
 
-Lq = 0.3
-xr = collect(range(-4e-3, 4e-3, length=9))
+# Nine rays entering parallel to the axis, at the same offset in x and in y, so
+# the two panels differ only through the sign of the focusing.
+ray_offsets = collect(range(-4e-3, 4e-3, length=9))
+
+"A dashed vertical pair marking where the quadrupole begins and ends."
+quad_marker(ylo, yhi) = ([S_QUAD[1], S_QUAD[1], nothing, S_QUAD[2], S_QUAD[2]],
+                         [ylo, yhi, nothing, ylo, yhi])
 
 explorer(
     title   = "A quadrupole focuses one plane and defocuses the other",
@@ -378,26 +471,41 @@ explorer(
     note = "The thin-lens estimate f = 1/(k₁ℓ) and the thick-lens value −1/M₂₁ agree only "*
            "while f is much longer than the magnet itself.",
 ) do k
-    pieces = AbstractElement[Drift(0.1) for _ in 1:5]
-    append!(pieces, [Quadrupole(Lq/6, k) for _ in 1:6])
-    append!(pieces, [Drift(0.15)         for _ in 1:20])
-    c0 = zeros(length(xr), 6); c0[:, 1] .= xr; c0[:, 3] .= xr
-    S, X, Y = track_s(pieces, beam, c0)
+    beamline = AbstractElement[
+        [Drift(0.1)                  for _ in 1:5]...,
+        [Quadrupole(L_QUAD/N_SLICES, k) for _ in 1:N_SLICES]...,
+        [Drift(0.15)                 for _ in 1:20]...,
+    ]
 
-    M  = transfer_map(Lattice(AbstractElement[Quadrupole(Lq, k)]), beam)
-    marker = ([0.5, 0.5, nothing, 0.8, 0.8], [-9.0, 9.0, nothing, -9.0, 9.0])
+    rays = zeros(length(ray_offsets), 6)
+    rays[:, IX] .= ray_offsets
+    rays[:, IY] .= ray_offsets
+    s, states = track_and_record(beamline, beam, rays)
 
-    (series = vcat(
-        [line(S, X[j, :] .* 1e3; panel=1, color=PALETTE[1], alpha=0.85, width=1.4)
-         for j in eachindex(xr)],
-        [line(S, Y[j, :] .* 1e3; panel=2, color=PALETTE[2], alpha=0.85, width=1.4)
-         for j in eachindex(xr)],
-        [line(marker...; panel=1, color="#9aa4b2", dash=true, width=1, label="quad"),
-         line(marker...; panel=2, color="#9aa4b2", dash=true, width=1, label="quad")]),
-     readouts = ["k₁ℓ [m⁻¹]" => round(k*Lq; sigdigits=4),
-                 "thin lens f = 1/(k₁ℓ)" => k == 0 ? "∞" : string(round(1/(k*Lq); sigdigits=4), " m"),
-                 "thick lens f = −1/M₂₁" => M[2,1] == 0 ? "∞" : string(round(-1/M[2,1]; sigdigits=4), " m"),
-                 "det M (x block)" => round(M[1,1]*M[2,2] - M[1,2]*M[2,1]; digits=9)])
+    # The whole magnet as ONE thick element, for the exact transfer matrix.
+    M = transfer_map(Lattice(AbstractElement[Quadrupole(L_QUAD, k)]), beam)
+
+    horizontal = [line(s, trajectory(states, i, IX) .* 1e3; panel=1,
+                       color=PALETTE[1], alpha=0.85, width=1.4)
+                  for i in eachindex(ray_offsets)]
+    vertical   = [line(s, trajectory(states, i, IY) .* 1e3; panel=2,
+                       color=PALETTE[2], alpha=0.85, width=1.4)
+                  for i in eachindex(ray_offsets)]
+
+    # A lens takes a parallel ray to the axis after a focal length f; for a
+    # transfer matrix that is x′_out = −x_in/f, i.e. f = −1/M₂₁.
+    thin_lens_f  = k == 0    ? "∞" : string(round(1/(k*L_QUAD); sigdigits=4), " m")
+    thick_lens_f = M[2,1] == 0 ? "∞" : string(round(-1/M[2,1];  sigdigits=4), " m")
+
+    (series = vcat(horizontal, vertical,
+        [line(quad_marker(-9.0, 9.0)...; panel=1, color="#9aa4b2", dash=true,
+              width=1, label="quad"),
+         line(quad_marker(-9.0, 9.0)...; panel=2, color="#9aa4b2", dash=true,
+              width=1, label="quad")]),
+     readouts = ["k₁ℓ [m⁻¹]"             => round(k*L_QUAD; sigdigits=4),
+                 "thin lens f = 1/(k₁ℓ)" => thin_lens_f,
+                 "thick lens f = −1/M₂₁" => thick_lens_f,
+                 "det M (x block)"       => round(M[1,1]*M[2,2] - M[1,2]*M[2,1]; digits=9)])
 end
 ```
 
@@ -409,39 +517,28 @@ phase-space cloud at entrance, at the magnet and at exit.
 :tags: [hide-input]
 
 using Random, Statistics, StaticArrays, TrackPad, TrackPadWidgets
+# `beam`, `track_and_record`, `plotdata` and `IX`/`IPX` come from the cells above.
 
-"""
-Track a bunch through `pieces`, returning the s grid and the full coordinate
-array recorded at every element boundary.
-"""
-function track_states(pieces, beam, coords0)
-    c = copy(coords0); flags = zeros(Int, size(c, 1))
-    S = Float64[0.0]; C = [copy(c)]
-    for e in pieces
-        linepass!(c, Lattice(AbstractElement[e]), beam, flags)
-        push!(S, S[end] + get_length(e))
-        push!(C, copy(c))
-    end
-    S, C
+const L_QUAD_SHORT = 0.1          # quadrupole length [m], centred on s = 0
+const L_ARM        = 0.95         # drift on each side, so s runs −1 m → +1 m
+const SLICES_DRIFT = 10           # slices per drift arm, for a smooth envelope
+const SLICES_QUAD  = 4            # slices inside the quadrupole
+const N_CLOUD      = 500          # particles in the phase-space clouds
+const N_RAYS       = 50           # trajectories drawn individually
+const SIGMA_IN     = 2.0e-3       # entrance rms beam size, held at 2 mm
+
+"The line drift – quadrupole – drift, sliced so the optics can be watched inside."
+function quad_beamline(k)
+    arm = [Drift(L_ARM/SLICES_DRIFT) for _ in 1:SLICES_DRIFT]
+    return AbstractElement[
+        arm...,
+        [Quadrupole(L_QUAD_SHORT/SLICES_QUAD, k) for _ in 1:SLICES_QUAD]...,
+        arm...,
+    ]
 end
 
-const LQ   = 0.1        # quadrupole length [m], centred on s = 0
-const LARM = 0.95       # drift on each side, so s runs −1 m → +1 m
-const NDR  = 10         # slices per drift arm (for a smooth envelope)
-const NSQ  = 4          # slices inside the quadrupole
-const NPQ  = 500        # particles in the cloud
-const NRAY = 50         # trajectories drawn individually
-const SIGQ = 2.0e-3     # entrance rms beam size, held at 2 mm for every setting
-
-# s = −1 m (entrance), 0 (quad centre) and +1 m (exit) in the recorded grid
-const ISNAP = (1, 1 + NDR + NSQ ÷ 2, 1 + 2NDR + NSQ)
-# A ray is straight in each drift, so five points draw it exactly; only the
-# envelope, a hyperbola, needs the full grid.
-const IRAY  = (1, 1 + NDR, ISNAP[2], 1 + NDR + NSQ, 1 + 2NDR + NSQ)
-
-# Plot coordinates are in mm/mrad; four significant digits is far finer than a
-# pixel and keeps the data embedded in the page small.
-r4(v) = round.(v; sigdigits=4)
+"Index of the recorded station closest to `s_target`."
+nearest_station(s, s_target) = argmin(abs.(s .- s_target))
 
 explorer(
     title   = "A short quadrupole (ℓ = 10 cm) seen by a 2 mm beam",
@@ -466,40 +563,60 @@ explorer(
            "The three insets share one x/pₓ box, sized to hold every particle at all "*
            "three stations, so the clouds can be compared directly; the box itself is "*
            "redrawn for each setting of the knobs.",
-) do β0, α0, k
-    ε  = SIGQ^2 / β0                       # holds σₓ(−1 m) = 2 mm for every β₀
-    c0 = matched_gaussian(MersenneTwister(1234), NPQ, optics4DUC(β0, α0, β0, α0);
-                          emitx=ε, emity=ε, emitz=1e-9, betaz=0.2)
+) do β₀, α₀, k
+    # Pinning σₓ(−1 m) = 2 mm fixes the emittance, as in the drift example above.
+    emittance = SIGMA_IN^2 / β₀
+    bunch_in  = matched_gaussian(MersenneTwister(1234), N_CLOUD,
+                                 optics4DUC(β₀, α₀, β₀, α₀);
+                                 emitx=emittance, emity=emittance,
+                                 emitz=1e-9, betaz=0.2)
 
-    pieces = AbstractElement[]
-    append!(pieces, [Drift(LARM / NDR)  for _ in 1:NDR])
-    append!(pieces, [Quadrupole(LQ / NSQ, k) for _ in 1:NSQ])
-    append!(pieces, [Drift(LARM / NDR)  for _ in 1:NDR])
-    S, C = track_states(pieces, beam, c0)
-    s   = S .- 1.0                         # put the quadrupole centre at s = 0
-    env = [std(c[:, 1]) for c in C] .* 1e3
+    s_raw, states = track_and_record(quad_beamline(k), beam, bunch_in)
+    s = s_raw .- (L_ARM + L_QUAD_SHORT/2)      # put the quadrupole centre at s = 0
 
-    sray = r4([s[j] for j in IRAY])
-    rays = [line(sray, r4([C[j][i, 1] * 1e3 for j in IRAY]); panel=1,
-                 color=PALETTE[1], alpha=0.4, width=1.0) for i in 1:NRAY]
-    insets = [points(r4([c[i, 1] * 1e3 for i in 1:NPQ]), r4([c[i, 2] * 1e3 for i in 1:NPQ]);
-                     panel=p, color=PALETTE[p - 1], size=2.6, alpha=0.5)
-              for (p, c) in zip(2:4, (C[ISNAP[1]], C[ISNAP[2]], C[ISNAP[3]]))]
+    # The three stations the insets show, found by position rather than by
+    # counting slices — so the geometry constants above can change freely.
+    i_entrance = nearest_station(s, -1.0)
+    i_centre   = nearest_station(s,  0.0)
+    i_exit     = nearest_station(s, +1.0)
+
+    # A ray is straight in each drift, so it is drawn exactly by the stations
+    # where the geometry changes. The envelope is a hyperbola and needs them all.
+    ray_stations = unique([1, nearest_station(s, -L_QUAD_SHORT/2), i_centre,
+                           nearest_station(s, +L_QUAD_SHORT/2), length(s)])
+    ray_s = plotdata(s[ray_stations])
+    rays  = [line(ray_s, plotdata([states[j][i, IX] * 1e3 for j in ray_stations]);
+                  panel=1, color=PALETTE[1], alpha=0.4, width=1.0)
+             for i in 1:N_RAYS]
+
+    envelope = [std(state[:, IX]) for state in states] .* 1e3
+
+    insets = [points(plotdata(states[j][:, IX]  .* 1e3),
+                     plotdata(states[j][:, IPX] .* 1e3);
+                     panel=panel, color=PALETTE[panel - 1], size=2.6, alpha=0.5)
+              for (panel, j) in zip(2:4, (i_entrance, i_centre, i_exit))]
+
+    quad_marker = ([-L_QUAD_SHORT/2, -L_QUAD_SHORT/2, nothing,
+                     L_QUAD_SHORT/2,  L_QUAD_SHORT/2],
+                   [-12.0, 12.0, nothing, -12.0, 12.0])
 
     (series = vcat(rays,
-        [line(r4(s), r4(env);  panel=1, color=PALETTE[4], width=2.0, label="±σₓ(s)"),
-         line(r4(s), r4(-env); panel=1, color=PALETTE[4], width=2.0),
-         line([-LQ/2, -LQ/2, nothing, LQ/2, LQ/2], [-12.0, 12.0, nothing, -12.0, 12.0];
-              panel=1, color="#9aa4b2", dash=true, width=1, label="quadrupole")],
+        [line(plotdata(s), plotdata(envelope);  panel=1, color=PALETTE[4], width=2.0,
+              label="±σₓ(s)"),
+         line(plotdata(s), plotdata(-envelope); panel=1, color=PALETTE[4], width=2.0),
+         line(quad_marker...; panel=1, color="#9aa4b2", dash=true, width=1,
+              label="quadrupole")],
         insets),
-     readouts = ["ε = σ₀²/β₀"  => string(round(ε * 1e9;   sigdigits=3), " nm·rad"),
-                 "σₓ′(−1 m)"   => string(round(std(C[ISNAP[1]][:, 2]) * 1e3; sigdigits=3), " mrad"),
-                 "k₁ℓ [m⁻¹]"   => string(round(k * LQ; sigdigits=3)),
-                 "f = 1/(k₁ℓ)" => k == 0 ? "∞" : string(round(1 / (k * LQ); sigdigits=3), " m"),
-                 "σₓ(0)"       => string(round(env[ISNAP[2]]; sigdigits=3), " mm"),
-                 "σₓ(+1 m)"    => string(round(env[ISNAP[3]]; sigdigits=3), " mm"),
-                 "waist σₓ"    => string(round(minimum(env);  sigdigits=3), " mm"),
-                 "waist at s"  => string(round(s[argmin(env)]; digits=2), " m")])
+     readouts = ["ε = σ₀²/β₀"  => string(round(emittance * 1e9; sigdigits=3), " nm·rad"),
+                 "σₓ′(−1 m)"   => string(round(std(states[i_entrance][:, IPX]) * 1e3;
+                                               sigdigits=3), " mrad"),
+                 "k₁ℓ [m⁻¹]"   => string(round(k * L_QUAD_SHORT; sigdigits=3)),
+                 "f = 1/(k₁ℓ)" => k == 0 ? "∞" :
+                                  string(round(1/(k * L_QUAD_SHORT); sigdigits=3), " m"),
+                 "σₓ(0)"       => string(round(envelope[i_centre]; sigdigits=3), " mm"),
+                 "σₓ(+1 m)"    => string(round(envelope[i_exit];   sigdigits=3), " mm"),
+                 "waist σₓ"    => string(round(minimum(envelope);  sigdigits=3), " mm"),
+                 "waist at s"  => string(round(s[argmin(envelope)]; digits=2), " m")])
 end
 ```
 
@@ -514,44 +631,58 @@ and the pair nets out to focusing.
 
 ```{code-cell} julia
 :tags: [hide-input]
+# `beam`, `track_and_record`, `plotdata`, `nearest_station` and `IX`/`IPX` all
+# come from the cells above.
 
-const FLQ  = 0.2                    # quadrupole length [m]
-const FN1, FNQ, FN2 = 6, 4, 12      # slices: outer drift, quadrupole, middle drift
-const NPF  = 200                    # particles in the cloud
-const NRF  = 10                     # trajectories drawn individually
-const SIGF = 1.5e-3                 # entrance rms beam size, held at 1.5 mm
+const L_QUAD_FODO  = 0.2          # quadrupole length [m]
+const S_QF         = -1.0         # focusing quadrupole centre [m]
+const S_QD         = +1.0         # defocusing quadrupole centre [m]
+const CELL_HALF    = 2.0          # the cell runs −2 m → +2 m
+const N_CLOUD_FODO = 200          # particles in the phase-space clouds
+const N_RAYS_FODO  = 10           # trajectories drawn individually
+const SIGMA_IN_FODO = 1.5e-3      # entrance rms beam size, held at 1.5 mm
 
-# Boundary indices of the two quadrupoles in the recorded grid, and of the exit.
-const IQ1 = (1 + FN1,             1 + FN1 + FNQ)
-const IQ2 = (1 + FN1 + FNQ + FN2, 1 + FN1 + 2FNQ + FN2)
-const NFP = 1 + 2FN1 + 2FNQ + FN2
-# A ray is straight in every drift, so it only needs the quadrupole boundaries
-# and the two ends; the envelope, a hyperbola between the magnets, needs them all.
-const IFR = (1, IQ1[1]:IQ1[2]..., IQ2[1]:IQ2[2]..., NFP)
-# The four phase-space stations: s = −2, −1 (QF centre), +1 (QD centre), +2.
-const IST = (1, 1 + FN1 + FNQ ÷ 2, 1 + FN1 + FNQ + FN2 + FNQ ÷ 2, NFP)
+"""
+    fodo_beamline(k)
 
-"The −2 m → +2 m cell: drift, QF at −1 m, drift, QD at +1 m, drift."
-function fodo_pieces(k)
-    p = AbstractElement[]
-    append!(p, [Drift(0.9 / FN1)  for _ in 1:FN1])
-    append!(p, [Quadrupole(FLQ / FNQ, +k) for _ in 1:FNQ])
-    append!(p, [Drift(1.8 / FN2)  for _ in 1:FN2])
-    append!(p, [Quadrupole(FLQ / FNQ, -k) for _ in 1:FNQ])
-    append!(p, [Drift(0.9 / FN1)  for _ in 1:FN1])
-    p
+The cell drift – QF – drift – QD – drift, spanning −2 m → +2 m with the two
+quadrupoles centred at ∓1 m. Every piece is sliced so the envelope is smooth;
+the slice counts only affect resolution, never the optics.
+"""
+function fodo_beamline(k)
+    outer_drift  = (CELL_HALF + S_QF) - L_QUAD_FODO/2       # 0.9 m
+    middle_drift = (S_QD - S_QF) - L_QUAD_FODO              # 1.8 m
+    return AbstractElement[
+        [Drift(outer_drift/6)               for _ in 1:6]...,
+        [Quadrupole(L_QUAD_FODO/4, +k)      for _ in 1:4]...,
+        [Drift(middle_drift/12)             for _ in 1:12]...,
+        [Quadrupole(L_QUAD_FODO/4, -k)      for _ in 1:4]...,
+        [Drift(outer_drift/6)               for _ in 1:6]...,
+    ]
 end
 
-qmark(ylo, yhi) = ([-1-FLQ/2, -1-FLQ/2, nothing, -1+FLQ/2, -1+FLQ/2, nothing,
-                     1-FLQ/2,  1-FLQ/2, nothing,  1+FLQ/2,  1+FLQ/2],
-                   [ylo, yhi, nothing, ylo, yhi, nothing,
-                    ylo, yhi, nothing, ylo, yhi])
+"Dashed verticals at the four quadrupole faces."
+function fodo_markers(ylo, yhi)
+    faces = [S_QF - L_QUAD_FODO/2, S_QF + L_QUAD_FODO/2,
+             S_QD - L_QUAD_FODO/2, S_QD + L_QUAD_FODO/2]
+    xs = Union{Float64,Nothing}[]
+    ys = Union{Float64,Nothing}[]
+    for (i, f) in enumerate(faces)
+        i > 1 && (push!(xs, nothing); push!(ys, nothing))
+        push!(xs, f, f)
+        push!(ys, ylo, yhi)
+    end
+    return xs, ys
+end
 
-# |Tr M| = 2 exactly is the boundary, where the motion grows linearly rather
-# than staying bounded — a pure drift (k₁ = 0) sits there, so name it as its own
-# case instead of rounding it into "stable".
-stability(t) = t < 2 - 1e-9 ? "stable" :
-               t <= 2 + 1e-9 ? "marginal (|Tr M| = 2)" : "unstable"
+# |Tr M| = 2 exactly is the boundary, where the motion grows linearly rather than
+# staying bounded — a pure drift (k₁ = 0) sits there, so it gets its own name
+# instead of being rounded into "stable".
+function stability_verdict(trace)
+    trace < 2 - 1e-9  && return "stable"
+    trace <= 2 + 1e-9 && return "marginal (|Tr M| = 2)"
+    return "unstable"
+end
 
 explorer(
     title   = "A FODO cell: QF at s = −1 m, QD at s = +1 m, equal strength",
@@ -580,40 +711,63 @@ explorer(
            "trace of this 4 m cell — the stability test of the previous section, "*
            "applied as if the cell were repeated forever; it comes out the same in "*
            "both planes, which is why one number decides the FODO cell.",
-) do β0, α0, k
-    ε  = SIGF^2 / β0                               # holds σₓ(−2 m) = 1.5 mm
-    c0 = matched_gaussian(MersenneTwister(1234), NPF, optics4DUC(β0, α0, β0, α0);
-                          emitx=ε, emity=ε, emitz=1e-9, betaz=0.2)
-    S, C = track_states(fodo_pieces(k), beam, c0)
-    s    = S .- 2.0                                # cell centre at s = 0
-    env  = [std(c[:, 1]) for c in C] .* 1e3
-    sray = r4([s[j] for j in IFR])
+) do β₀, α₀, k
+    emittance = SIGMA_IN_FODO^2 / β₀          # holds σₓ(−2 m) = 1.5 mm
+    bunch_in  = matched_gaussian(MersenneTwister(1234), N_CLOUD_FODO,
+                                 optics4DUC(β₀, α₀, β₀, α₀);
+                                 emitx=emittance, emity=emittance,
+                                 emitz=1e-9, betaz=0.2)
 
-    M   = transfer_map(Lattice(fodo_pieces(k)), beam)
-    trx = abs(M[1,1] + M[2,2]); try_ = abs(M[3,3] + M[4,4])
-    
+    s_raw, states = track_and_record(fodo_beamline(k), beam, bunch_in)
+    s = s_raw .- CELL_HALF                    # cell centre at s = 0
 
-    rays = [line(sray, r4([C[j][i, 1] * 1e3 for j in IFR]); panel=1,
-                 color=PALETTE[1], alpha=0.35, width=1.0) for i in 1:NRF]
-    insets = [points(r4([c[i, 1] * 1e3 for i in 1:NPF]), r4([c[i, 2] * 1e3 for i in 1:NPF]);
-                     panel=p, color=PALETTE[p - 1], size=2.4, alpha=0.45)
-              for (p, c) in zip(2:5, (C[IST[1]], C[IST[2]], C[IST[3]], C[IST[4]]))]
+    # The four stations the insets show, found by position.
+    i_start = nearest_station(s, -CELL_HALF)
+    i_qf    = nearest_station(s, S_QF)
+    i_qd    = nearest_station(s, S_QD)
+    i_end   = nearest_station(s, +CELL_HALF)
+
+    # A ray is straight in every drift, so the quadrupole faces plus the two ends
+    # draw it exactly; the envelope, a hyperbola between the magnets, needs all.
+    ray_stations = unique([1,
+                           nearest_station(s, S_QF - L_QUAD_FODO/2), i_qf,
+                           nearest_station(s, S_QF + L_QUAD_FODO/2),
+                           nearest_station(s, S_QD - L_QUAD_FODO/2), i_qd,
+                           nearest_station(s, S_QD + L_QUAD_FODO/2),
+                           length(s)])
+    ray_s = plotdata(s[ray_stations])
+    rays  = [line(ray_s, plotdata([states[j][i, IX] * 1e3 for j in ray_stations]);
+                  panel=1, color=PALETTE[1], alpha=0.35, width=1.0)
+             for i in 1:N_RAYS_FODO]
+
+    envelope = [std(state[:, IX]) for state in states] .* 1e3
+
+    insets = [points(plotdata(states[j][:, IX]  .* 1e3),
+                     plotdata(states[j][:, IPX] .* 1e3);
+                     panel=panel, color=PALETTE[panel - 1], size=2.4, alpha=0.45)
+              for (panel, j) in zip(2:5, (i_start, i_qf, i_qd, i_end))]
+
+    # The one-turn trace of the whole 4 m cell, in each plane separately.
+    M = transfer_map(Lattice(fodo_beamline(k)), beam)
+    trace_x = abs(M[1,1] + M[2,2])
+    trace_y = abs(M[3,3] + M[4,4])
 
     (series = vcat(rays,
-        [line(r4(s), r4(env);  panel=1, color=PALETTE[4], width=2.0, label="±σₓ(s)"),
-         line(r4(s), r4(-env); panel=1, color=PALETTE[4], width=2.0),
-         line(qmark(-12.0, 12.0)...; panel=1, color="#9aa4b2", dash=true, width=1,
-              label="quadrupoles")],
+        [line(plotdata(s), plotdata(envelope);  panel=1, color=PALETTE[4], width=2.0,
+              label="±σₓ(s)"),
+         line(plotdata(s), plotdata(-envelope); panel=1, color=PALETTE[4], width=2.0),
+         line(fodo_markers(-12.0, 12.0)...; panel=1, color="#9aa4b2", dash=true,
+              width=1, label="quadrupoles")],
         insets),
-     readouts = ["ε = σ₀²/β₀"  => string(round(ε * 1e9; sigdigits=3), " nm·rad"),
-                 "k₁ℓ [m⁻¹]"  => string(round(k * FLQ; sigdigits=3)),
-                 "σₓ(−2 m)"   => string(round(env[IST[1]]; sigdigits=3), " mm"),
-                 "σₓ at QF"   => string(round(env[IST[2]]; sigdigits=3), " mm"),
-                 "σₓ at QD"   => string(round(env[IST[3]]; sigdigits=3), " mm"),
-                 "σₓ(+2 m)"   => string(round(env[IST[4]]; sigdigits=3), " mm"),
-                 "|Tr Mₓ|"    => string(round(trx;  digits=3)),
-                 "|Tr Mᵧ|"    => string(round(try_; digits=3)),
-                 "if repeated" => stability(max(trx, try_))])
+     readouts = ["ε = σ₀²/β₀"  => string(round(emittance * 1e9; sigdigits=3), " nm·rad"),
+                 "k₁ℓ [m⁻¹]"   => string(round(k * L_QUAD_FODO; sigdigits=3)),
+                 "σₓ(−2 m)"    => string(round(envelope[i_start]; sigdigits=3), " mm"),
+                 "σₓ at QF"    => string(round(envelope[i_qf];    sigdigits=3), " mm"),
+                 "σₓ at QD"    => string(round(envelope[i_qd];    sigdigits=3), " mm"),
+                 "σₓ(+2 m)"    => string(round(envelope[i_end];   sigdigits=3), " mm"),
+                 "|Tr Mₓ|"     => string(round(trace_x; digits=3)),
+                 "|Tr Mᵧ|"     => string(round(trace_y; digits=3)),
+                 "if repeated" => stability_verdict(max(trace_x, trace_y))])
 end
 ```
 

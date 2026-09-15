@@ -117,36 +117,52 @@ kinetic energy and watch TrackPad's own $(\beta_0,\gamma_0)$ ride along it:
 ```{code-cell} julia
 :tags: [hide-input]
 
-using StaticArrays, TrackPad, TrackPadWidgets
+using TrackPad, TrackPadWidgets
 
-mₑ = 0.510998950e6          # electron rest mass [eV]
-γcurve = range(1.0001, 60.0, length=200)
-βcurve = @. sqrt(1 - 1/γcurve^2)
-Ks = 10.0 .^ range(4.0, 11.0, length=36)
+const M_E = 0.510998950e6            # electron rest energy [eV]
+
+# The analytic curve γ(β), drawn once as the backdrop.
+γ_curve = range(1.0001, 60.0, length=200)
+β_curve = @. sqrt(1 - 1/γ_curve^2)
+
+# Kinetic energies to step through: 10 keV … 100 GeV, evenly spaced in decades.
+kinetic_energies = 10.0 .^ range(4.0, 11.0, length=36)
+
+"Format an energy as e.g. \"3.2e7 eV\" — compact enough for a slider label."
+function energy_label(K)
+    decade  = floor(Int, log10(K))
+    mantissa = round(K / 10.0^decade; digits=1)
+    return string(mantissa, "e", decade, " eV")
+end
 
 explorer(
     title   = "TrackPad's Beam(K): γ and β are locked to the same curve",
-    sliders = [Knob("kinetic energy K", eachindex(Ks);
-                    fmt = i -> let K = Ks[i]
-                        string(round(K/10.0^floor(log10(K)); digits=1), "e", Int(floor(log10(K))), " eV")
-                    end, init = 20)],
+    sliders = [Knob("kinetic energy K", eachindex(kinetic_energies);
+                    fmt = i -> energy_label(kinetic_energies[i]), init = 20)],
     panels  = [Panel(xlabel="β", ylabel="γ", title="γ = 1/√(1−β²)",
                      xlim=(0.0,1.02), ylim=(0.0,20.0), height=300, legend=:bottomleft)],
-    statics = [line(βcurve, γcurve; color="#9aa4b2", label="analytic γ(β)")],
+    statics = [line(β_curve, γ_curve; color="#9aa4b2", label="analytic γ(β)")],
     note = "The marker is TrackPad's own (β₀, γ₀) for Beam(K); it lands on the analytic curve "*
            "by construction — γ = 1+K/mc² and β = √(1−1/γ²) always agree.",
 ) do i
-    K = Ks[i]
-    beam = Beam(K; mass=mₑ)
-    E0 = beam.energy + beam.mass
-    P0c = beam.beta*E0
-    (series = [points([beam.beta], [min(beam.gamma,20.0)]; color=PALETTE[1], size=7.0, label="Beam(K)")],
-     readouts = ["γ" => round(beam.gamma; sigdigits=6),
-                 "1+K/mc²" => round(1 + beam.energy/mₑ; sigdigits=6),
-                 "β" => round(beam.beta; sigdigits=6),
-                 "√(1−1/γ²)" => round(sqrt(1-1/beam.gamma^2); sigdigits=6),
-                 "E₀ [GeV]" => round(E0/1e9; sigdigits=5),
-                 "P₀c [GeV]" => round(P0c/1e9; sigdigits=5)])
+    K    = kinetic_energies[i]
+    beam = Beam(K; mass=M_E)
+
+    E_total   = beam.energy + beam.mass      # beam.energy is KINETIC energy
+    momentum  = beam.beta * E_total          # P₀c, in eV
+
+    # γ runs off the top of the panel at high K, so the marker is clamped to the
+    # axis; the readouts still report the true value.
+    γ_plotted = min(beam.gamma, 20.0)
+
+    (series = [points([beam.beta], [γ_plotted]; color=PALETTE[1], size=7.0,
+                      label="Beam(K)")],
+     readouts = ["γ"          => round(beam.gamma; sigdigits=6),
+                 "1+K/mc²"    => round(1 + beam.energy/M_E; sigdigits=6),
+                 "β"          => round(beam.beta; sigdigits=6),
+                 "√(1−1/γ²)"  => round(sqrt(1 - 1/beam.gamma^2); sigdigits=6),
+                 "E₀ [GeV]"   => round(E_total/1e9; sigdigits=5),
+                 "P₀c [GeV]"  => round(momentum/1e9; sigdigits=5)])
 end
 ```
 
@@ -159,36 +175,52 @@ $(P_zc,E)$ mass-shell hyperbola but never off it.
 
 using StaticArrays, LinearAlgebra, TrackPadWidgets
 
-g(β) = 1/sqrt(1-β^2)
-Λ(β) = @SMatrix [1 0 0 0;
-                 0 1 0 0;
-                 0 0 g(β) -g(β)*β;
-                 0 0 -g(β)*β g(β)]        # boost along z; order (x,y,z,ct)
-ηmetric = Diagonal([-1.0,-1.0,-1.0,1.0])
-P0 = @SVector [0.0, 0.0, 2.5, 3.0]        # (Px,Py,Pz,E)/c, GeV-ish units
-m2 = dot(P0, ηmetric*P0)
-Pzc = range(-6.0, 6.0, length=161)
-Ecurve = @. sqrt(Pzc^2 + m2)
+# Four-vectors here are ordered (x, y, z, ct), so a boost along z mixes only the
+# last two components. The metric has signature (−,−,−,+) to match that ordering.
+lorentz_gamma(β) = 1/sqrt(1 - β^2)
+
+function boost_along_z(β)
+    γ = lorentz_gamma(β)
+    return @SMatrix [1  0   0     0
+                     0  1   0     0
+                     0  0   γ    -γ*β
+                     0  0  -γ*β   γ]
+end
+
+const METRIC = Diagonal([-1.0, -1.0, -1.0, 1.0])
+minkowski_dot(A, B) = dot(A, METRIC * B)
+
+# A test particle, as (Pₓ, P_y, P_z, E)/c in GeV.
+P_lab = @SVector [0.0, 0.0, 2.5, 3.0]
+mass_squared = minkowski_dot(P_lab, P_lab)          # (mc²)², the invariant
+
+# The mass shell E² − (P_zc)² = (mc²)², i.e. every state this particle could be
+# boosted into.
+Pz_curve = range(-6.0, 6.0, length=161)
+E_curve  = @. sqrt(Pz_curve^2 + mass_squared)
 
 explorer(
     title   = "The energy-momentum invariant survives a boost",
     sliders = [Knob("boost β", range(-0.95, 0.95, length=39);
                     fmt = b -> string(round(b; digits=2)), init = 20)],
-    panels  = [Panel(xlabel="Pz c [GeV]", ylabel="E [GeV]", title="mass-shell E² − (Pzc)² = (mc²)²",
+    panels  = [Panel(xlabel="Pz c [GeV]", ylabel="E [GeV]",
+                     title="mass-shell E² − (Pzc)² = (mc²)²",
                      xlim=(-6.2,6.2), ylim=(0.0,7.0), height=300, legend=:bottomleft)],
-    statics = [line(Pzc, Ecurve; color="#9aa4b2", label="mass shell"),
-               points([P0[3]], [P0[4]]; color=PALETTE[3], size=6.0, label="P (rest frame value)")],
+    statics = [line(Pz_curve, E_curve; color="#9aa4b2", label="mass shell"),
+               points([P_lab[3]], [P_lab[4]]; color=PALETTE[3], size=6.0,
+                      label="P (rest frame value)")],
     note = "Boosting slides the point along the SAME hyperbola — that is exactly the "*
            "statement P·P is Lorentz-invariant.",
 ) do β
-    Pb = Λ(β)*P0
-    m2b = dot(Pb, ηmetric*Pb)
-    (series = [points([Pb[3]], [Pb[4]]; color=PALETTE[1], size=7.0, label="Λ(β)·P")],
-     readouts = ["β" => round(β; digits=3),
-                 "Pz′c [GeV]" => round(Pb[3]; sigdigits=5),
-                 "E′ [GeV]" => round(Pb[4]; sigdigits=5),
-                 "P·P" => round(m2; sigdigits=6),
-                 "(ΛP)·(ΛP)" => round(m2b; sigdigits=6)])
+    P_boosted = boost_along_z(β) * P_lab
+
+    (series = [points([P_boosted[3]], [P_boosted[4]]; color=PALETTE[1], size=7.0,
+                      label="Λ(β)·P")],
+     readouts = ["β"            => round(β; digits=3),
+                 "Pz′c [GeV]"   => round(P_boosted[3]; sigdigits=5),
+                 "E′ [GeV]"     => round(P_boosted[4]; sigdigits=5),
+                 "P·P"          => round(mass_squared; sigdigits=6),
+                 "(ΛP)·(ΛP)"    => round(minkowski_dot(P_boosted, P_boosted); sigdigits=6)])
 end
 ```
 
@@ -205,37 +237,44 @@ decades of kinetic energy for an electron and a proton:
 :tags: [hide-input]
 
 using TrackPad, TrackPadWidgets
+# `energy_label` was defined in the first code cell of this page.
 
-Ks   = 10.0 .^ range(4, 13, length=46)               # 10 keV … 10 TeV
-SPEC = [("electron", TrackPad.M_ELECTRON, -1.0), ("proton", TrackPad.M_PROTON, 1.0)]
-klabel(K) = string(round(K/10.0^floor(log10(K)); digits=1), "e", Int(floor(log10(K))), " eV")
+# 10 keV … 10 TeV, evenly spaced in decades.
+kinetic_scan = 10.0 .^ range(4, 13, length=46)
 
-background = Any[]
-for (i, (nm, m, q)) in enumerate(SPEC)
-    push!(background, line(Ks, [Beam(K; mass=m, charge=q).beta for K in Ks];
-                           color=PALETTE[i], label=nm))
-end
+SPECIES = [(name="electron", mass=TrackPad.M_ELECTRON, charge=-1.0),
+           (name="proton",   mass=TrackPad.M_PROTON,   charge=+1.0)]
+
+# One β(K) curve per species, drawn behind every frame.
+beta_curves = [line(kinetic_scan,
+                    [Beam(K; mass=s.mass, charge=s.charge).beta for K in kinetic_scan];
+                    color=PALETTE[i], label=s.name)
+               for (i, s) in enumerate(SPECIES)]
 
 explorer(
     title   = "Velocity saturates long before the energy does",
-    sliders = [Knob("kinetic energy", eachindex(Ks); fmt = i -> klabel(Ks[i]), init = 30),
-               Knob("particle", 1:2; fmt = j -> SPEC[j][1])],
+    sliders = [Knob("kinetic energy", eachindex(kinetic_scan);
+                    fmt = i -> energy_label(kinetic_scan[i]), init = 30),
+               Knob("particle", eachindex(SPECIES); fmt = j -> SPECIES[j].name)],
     panels  = [Panel(xlabel="kinetic energy K [eV]", ylabel="β = v/c",
                      xscale=:log10, xlim=(8.0e3, 1.3e13), ylim=(0.0, 1.05),
                      height=300, legend=:bottomright)],
-    statics = background,
+    statics = beta_curves,
     note = "The horizontal axis is logarithmic in K itself — nine decades of energy, and "*
            "each species climbs the same curve, displaced by the ratio of the rest masses.",
 ) do i, j
-    nm, m, q = SPEC[j]
-    b = Beam(Ks[i]; mass=m, charge=q)
-    (series = [points([Ks[i]], [b.beta]; color=PALETTE[j], size=6.5, label=nm)],
-     readouts = ["particle" => nm,
-                 "K"     => klabel(Ks[i]),
-                 "γ"     => round(b.gamma; sigdigits=5),
-                 "β"     => round(b.beta;  sigdigits=6),
-                 "1 − β" => string(round(1 - b.beta; sigdigits=3)),
-                 "P₀c"   => string(round(b.beta*(b.energy+b.mass)/1e9; sigdigits=4), " GeV")])
+    species = SPECIES[j]
+    K       = kinetic_scan[i]
+    beam    = Beam(K; mass=species.mass, charge=species.charge)
+
+    (series = [points([K], [beam.beta]; color=PALETTE[j], size=6.5, label=species.name)],
+     readouts = ["particle" => species.name,
+                 "K"     => energy_label(K),
+                 "γ"     => round(beam.gamma; sigdigits=5),
+                 "β"     => round(beam.beta;  sigdigits=6),
+                 "1 − β" => string(round(1 - beam.beta; sigdigits=3)),
+                 "P₀c"   => string(round(beam.beta*(beam.energy + beam.mass)/1e9;
+                                         sigdigits=4), " GeV")])
 end
 ```
 

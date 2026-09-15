@@ -128,38 +128,64 @@ as a function of beam kinetic energy for different particles.
 
 using TrackPad, TrackPadWidgets
 
-Brho(b) = b.beta * (b.energy + b.mass) / (abs(b.charge) * 2.99792458e8)  # [T·m]
-Ks   = 10.0 .^ range(4, 13, length=46)                  # 10 keV … 10 TeV
-SPEC = [("electron", TrackPad.M_ELECTRON, -1.0), ("proton", TrackPad.M_PROTON, 1.0)]
-klabel(K) = string(round(K/10.0^floor(log10(K)); digits=1), "e", Int(floor(log10(K))), " eV")
+const C_LIGHT = 2.99792458e8         # [m/s]
 
-background = Any[]
-for (i, (nm, m, q)) in enumerate(SPEC)
-    push!(background, line(Ks, [Brho(Beam(K; mass=m, charge=q)) for K in Ks];
-                           color=PALETTE[i], label=nm))
+"""
+    rigidity(beam)
+
+Bρ = P/q in T·m. `beam.energy` is KINETIC energy, so the total energy is
+`beam.energy + beam.mass` and P₀c = β·E₀. Dividing by the charge is what makes
+this correct for an ion and not just for a proton or electron.
+"""
+rigidity(beam) = beam.beta * (beam.energy + beam.mass) / (abs(beam.charge) * C_LIGHT)
+
+# 10 keV … 10 TeV, evenly spaced in decades.
+kinetic_scan = 10.0 .^ range(4, 13, length=46)
+
+SPECIES = [(name="electron", mass=TrackPad.M_ELECTRON, charge=-1.0),
+           (name="proton",   mass=TrackPad.M_PROTON,   charge=+1.0)]
+
+"Format an energy as e.g. \"3.2e7 eV\" — compact enough for a slider label."
+function energy_label(K)
+    decade   = floor(Int, log10(K))
+    mantissa = round(K / 10.0^decade; digits=1)
+    return string(mantissa, "e", decade, " eV")
 end
+
+# One Bρ(K) curve per species, drawn behind every frame.
+rigidity_curves = [line(kinetic_scan,
+                        [rigidity(Beam(K; mass=s.mass, charge=s.charge)) for K in kinetic_scan];
+                        color=PALETTE[i], label=s.name)
+                   for (i, s) in enumerate(SPECIES)]
 
 explorer(
     title   = "Rigidity does not saturate",
-    sliders = [Knob("kinetic energy", eachindex(Ks); fmt = i -> klabel(Ks[i]), init = 30),
-               Knob("particle", 1:2; fmt = j -> SPEC[j][1])],
+    sliders = [Knob("kinetic energy", eachindex(kinetic_scan);
+                    fmt = i -> energy_label(kinetic_scan[i]), init = 30),
+               Knob("particle", eachindex(SPECIES); fmt = j -> SPECIES[j].name)],
     panels  = [Panel(xlabel="kinetic energy K [eV]", ylabel="Bρ [T·m]",
                      xscale=:log10, yscale=:log10, xlim=(8.0e3, 1.3e13),
                      height=300, legend=:bottomright)],
-    statics = background,
+    statics = rigidity_curves,
     note = "Bρ = P/q is the natural normalisation of transverse motion: TrackPad's k₁ is "*
            "G/(Bρ). At low energy the two species differ by their rest masses; once both "*
            "are ultra-relativistic the curves merge, because Bρ then depends only on energy.",
 ) do i, j
-    nm, m, q = SPEC[j]
-    b = Beam(Ks[i]; mass=m, charge=q)
-    (series = [points([Ks[i]], [Brho(b)]; color=PALETTE[j], size=6.5, label=nm)],
-     readouts = ["particle" => nm,
-                 "K"   => klabel(Ks[i]),
-                 "β"   => round(b.beta; sigdigits=6),
-                 "P₀c" => string(round(b.beta*(b.energy+b.mass)/1e9; sigdigits=4), " GeV"),
-                 "Bρ"  => string(round(Brho(b); sigdigits=4), " T·m"),
-                 "B for ρ = 10 m" => string(round(Brho(b)/10; sigdigits=4), " T")])
+    species = SPECIES[j]
+    K       = kinetic_scan[i]
+    beam    = Beam(K; mass=species.mass, charge=species.charge)
+    Bρ      = rigidity(beam)
+
+    (series = [points([K], [Bρ]; color=PALETTE[j], size=6.5, label=species.name)],
+     readouts = ["particle" => species.name,
+                 "K"   => energy_label(K),
+                 "β"   => round(beam.beta; sigdigits=6),
+                 "P₀c" => string(round(beam.beta*(beam.energy + beam.mass)/1e9;
+                                       sigdigits=4), " GeV"),
+                 "Bρ"  => string(round(Bρ; sigdigits=4), " T·m"),
+                 # The field a 10 m bending radius would need — the number that
+                 # decides whether the magnet can be iron or has to be supercon.
+                 "B for ρ = 10 m" => string(round(Bρ/10; sigdigits=4), " T")])
 end
 ```
 
@@ -255,22 +281,51 @@ $$
 
 ```{code-cell} julia
 :tags: [hide-input]
-# Field-line patterns of normal and skew quadrupoles: B ∝ ∇Ψ with Ψ = B₀b₁xy
+
 using CairoMakie
 
+# A multipole field in the gap is source-free, so it derives from a scalar
+# potential Ψ: B ∝ ∇Ψ. Contours of Ψ are therefore the field LINES, and the pole
+# faces of a real magnet are cut along them. Each magnet below is specified by
+# its Ψ and by the ∇Ψ we draw as arrows.
+
 xs = range(-5, 5, length=41)
-X = [x for x in xs, _ in xs]
-Y = [y for _ in xs, y in xs]
 
-sel(a) = vec(a[1:3:end, 1:3:end])
+# Grid convention on this page: index 1 runs along x, index 2 along y, which is
+# the order Makie's contour!(x, y, z) expects.
+grid_x = [x for x in xs, _ in xs]
+grid_y = [y for _ in xs, y in xs]
+
+# One arrow every third grid point, so the quiver stays readable.
+every = 3
+sample(a) = vec(a[1:every:end, 1:every:end])
+
+"""
+    multipole_panel!(ax, title, Ψ, Bx, By; levels, arrowscale)
+
+Draw one magnet: contours of the potential `Ψ` (the field lines) with the field
+`(Bx, By) = ∇Ψ` on top. All three are matrices on the (grid_x, grid_y) grid.
+"""
+function multipole_panel!(ax, title, Ψ, Bx, By; levels, arrowscale)
+    ax.title = title
+    contour!(ax, xs, xs, Ψ; levels, colormap=:coolwarm, linewidth=2)
+    arrows2d!(ax, sample(grid_x), sample(grid_y), sample(Bx), sample(By);
+              color=:gray, lengthscale=arrowscale)
+end
+
+# Normal quadrupole: Ψ = xy, so B ∝ (y, x) — zero on the axis, growing linearly.
+# Skew quadrupole: the same field rotated by 45°, Ψ = (x² − y²)/2, B ∝ (x, −y).
 fig = Figure(size=(800, 380))
-ax1 = Axis(fig[1, 1]; aspect=DataAspect(), title="Normal quad")
-contour!(ax1, xs, xs, X .* Y; levels=[-6,-4,-2,2,4,6], colormap = :coolwarm, linewidth=2)
-arrows2d!(ax1, sel(X), sel(Y), sel(Y), sel(X); color=:gray, lengthscale=0.08)
+quad_levels = [-6, -4, -2, 2, 4, 6]
 
-ax2 = Axis(fig[1, 2]; aspect=DataAspect(), title="Skew quad")
-contour!(ax2, xs, xs, (X.^2 .- Y.^2)./2; levels=[-6,-4,-2,2,4,6], colormap = :coolwarm, linewidth=2)
-arrows2d!(ax2, sel(X), sel(Y), sel(X), -sel(Y); color=:gray, lengthscale=0.08)
+multipole_panel!(Axis(fig[1, 1]; aspect=DataAspect()), "Normal quad",
+                 grid_x .* grid_y, grid_y, grid_x;
+                 levels=quad_levels, arrowscale=0.08)
+
+multipole_panel!(Axis(fig[1, 2]; aspect=DataAspect()), "Skew quad",
+                 (grid_x.^2 .- grid_y.^2) ./ 2, grid_x, -grid_y;
+                 levels=quad_levels, arrowscale=0.08)
+
 fig
 ```
 
@@ -287,28 +342,27 @@ $$
 ```{code-cell} julia
 :tags: [hide-input]
 
-using CairoMakie
+# Same construction as the quadrupole figure, one order higher: the potential is
+# now cubic in the coordinates, so the field grows like x² instead of like x.
+# `multipole_panel!`, `grid_x`, `grid_y` and `sample` come from the cell above.
 
-xs = range(-5, 5, length=41)
-X = [x for x in xs, _ in xs]
-Y = [y for _ in xs, y in xs]
+# Normal sextupole: Ψ = (3x²y − y³)/3, giving B ∝ (2xy, x² − y²).
+# Skew sextupole:   Ψ = (x³ − 3xy²)/3, giving B ∝ (x² − y², −2xy).
+Ψ_normal = (3 .* grid_x.^2 .* grid_y .- grid_y.^3) ./ 3
+Ψ_skew   = (grid_x.^3 .- 3 .* grid_x .* grid_y.^2) ./ 3
 
-sel(a) = vec(a[1:3:end, 1:3:end])
-
-# Normal sextupole: Ψ ∝ (3x²y − y³)/3 ; skew sextupole: Ψ ∝ (x³ − 3xy²)/3
-Zn = (3 .* X.^2 .* Y .- Y.^3) ./ 3
-Zs = (X.^3 .- 3 .* X .* Y.^2) ./ 3
+sext_levels = [-6, -4, -2, 2, 4, 6] .* 3.0
 
 fig = Figure(size=(800, 380))
-ax1 = Axis(fig[1, 1]; aspect=DataAspect(), title="Normal sextupole")
-contour!(ax1, xs, xs, Zn; levels= [-6,-4,-2,2,4,6].* 3.0 ,colormap = :coolwarm, linewidth=2)
-uₙ, vₙ = 2 .* X .* Y, X.^2 .- Y.^2          # B ∝ ∇Ψ components
-arrows2d!(ax1, sel(X), sel(Y), sel(uₙ), sel(vₙ); color=:gray, lengthscale=0.01)
 
-ax2 = Axis(fig[1, 2]; aspect=DataAspect(), title="Skew sextupole")
-contour!(ax2, xs, xs, Zs; levels=[-6,-4,-2,2,4,6].*3.0, colormap = :coolwarm, linewidth=2)
-uₛ, vₛ =X.^2 .- Y.^2, (-2) .* X .* Y         # B ∝ ∇Ψ components
-arrows2d!(ax2, sel(X), sel(Y), sel(uₛ), sel(vₛ); color=:gray, lengthscale=0.01)
+multipole_panel!(Axis(fig[1, 1]; aspect=DataAspect()), "Normal sextupole",
+                 Ψ_normal, 2 .* grid_x .* grid_y, grid_x.^2 .- grid_y.^2;
+                 levels=sext_levels, arrowscale=0.01)
+
+multipole_panel!(Axis(fig[1, 2]; aspect=DataAspect()), "Skew sextupole",
+                 Ψ_skew, grid_x.^2 .- grid_y.^2, -2 .* grid_x .* grid_y;
+                 levels=sext_levels, arrowscale=0.01)
+
 fig
 ```
 
@@ -337,30 +391,65 @@ compare:
 
 using TrackPad, TrackPadWidgets
 
-beam = Beam(3.0e9)
+beam = Beam(3.0e9)                   # 3 GeV electron, used by every tracking cell here
 
-"Track a bunch element by element, recording x and y at every boundary."
-function track_s(pieces, beam, coords0)
-    c = copy(coords0); flags = zeros(Int, size(c, 1))
-    S = Float64[0.0]; X = [copy(c[:, 1])]; Y = [copy(c[:, 3])]
-    for e in pieces
-        linepass!(c, Lattice(AbstractElement[e]), beam, flags)
-        push!(S, S[end] + get_length(e))
-        push!(X, copy(c[:, 1])); push!(Y, copy(c[:, 3]))
+# Column layout of a TrackPad coordinate array: (x, pₓ, y, p_y, z, δE).
+const IX, IPX = 1, 2
+
+"""
+    track_and_record(pieces, beam, coords0)
+
+Track the bunch `coords0` through `pieces` one element at a time, saving the
+full coordinate array after every element.
+
+Returns `(s, states)`: `s[i]` is the distance from the start of the line and
+`states[i]` is a copy of the `nparticle × 6` array there. Cutting a magnet into
+several short `pieces` is what gives a smooth curve *inside* the magnet —
+`linepass!` on its own only reports the exit.
+"""
+function track_and_record(pieces, beam, coords0)
+    coords = copy(coords0)
+    lost   = zeros(Int, size(coords, 1))
+    s      = [0.0]
+    states = [copy(coords)]
+    for element in pieces
+        linepass!(coords, Lattice(AbstractElement[element]), beam, lost)
+        push!(s, s[end] + get_length(element))
+        push!(states, copy(coords))
     end
-    S, reduce(hcat, X), reduce(hcat, Y)      # X[particle, step]
+    return s, states
 end
 
-KINDS = [("quadrupole", (L, g) -> Quadrupole(L, g), "k₁ [m⁻²]", 4.0,   "Δpₓ ∝ x"),
-         ("sextupole",  (L, g) -> Sextupole(L, g),  "k₂ [m⁻³]", 400.0, "Δpₓ ∝ x²"),
-         ("octupole",   (L, g) -> Octupole(L, g),   "k₃ [m⁻⁴]", 4.0e4, "Δpₓ ∝ x³")]
-Lm   = 0.2
-xin  = collect(range(-15e-3, 15e-3, length=41))
-xfan = collect(range(-15e-3, 15e-3, length=11))
+"Coordinate `col` of particle `i` at every recorded station."
+trajectory(states, i, col) = [state[i, col] for state in states]
+
+# The three magnets to compare. `strength_max` is chosen per order so that all
+# three deliver a similar kick at the edge of the fan (x = 15 mm); what differs
+# is the SHAPE of the kick, which is the point of the figure.
+MAGNETS = [(name="quadrupole", build=Quadrupole, unit="k₁ [m⁻²]",
+            strength_max=4.0,   law="Δpₓ ∝ x"),
+           (name="sextupole",  build=Sextupole,  unit="k₂ [m⁻³]",
+            strength_max=400.0, law="Δpₓ ∝ x²"),
+           (name="octupole",   build=Octupole,   unit="k₃ [m⁻⁴]",
+            strength_max=4.0e4, law="Δpₓ ∝ x³")]
+
+# Beamline geometry: 0.5 m of drift, the magnet, then 2.1 m to watch the fan.
+const L_MAGNET  = 0.2
+const S_MAGNET  = (0.5, 0.7)                   # where the magnet sits, for the marker
+const N_SLICES  = 4                            # magnet slices, for a smooth ray inside it
+
+# Two sets of starting offsets: a fine one to measure the kick-versus-offset
+# curve, and a coarse one to draw as a ray fan.
+offsets_fine = collect(range(-15e-3, 15e-3, length=41))
+offsets_fan  = collect(range(-15e-3, 15e-3, length=11))
+
+"A dashed vertical pair marking where the magnet begins and ends."
+magnet_marker(ylo, yhi) = ([S_MAGNET[1], S_MAGNET[1], nothing, S_MAGNET[2], S_MAGNET[2]],
+                           [ylo, yhi, nothing, ylo, yhi])
 
 explorer(
     title   = "One multipole, one ray fan",
-    sliders = [Knob("magnet", 1:3; fmt = i -> KINDS[i][1]),
+    sliders = [Knob("magnet", eachindex(MAGNETS); fmt = i -> MAGNETS[i].name),
                Knob("relative strength", range(0.0, 1.0, length=11);
                       fmt = f -> string(Int(round(100f)), " %"), init = 7)],
     panels  = [Panel(xlabel="entrance x [mm]", ylabel="Δpₓ at exit [mrad]",
@@ -369,31 +458,47 @@ explorer(
                      ylim=(-20.0, 20.0), height=250, legend=:bottomleft)],
     note = "Each magnet's strength scale is chosen so that the three orders give a comparable "*
            "kick at x = 15 mm — the difference you see is the shape of the kick, not its size.",
-) do i, f
-    name, make, unit, gmax, law = KINDS[i]
-    g   = f * gmax
-    mag = make(Lm, g)
+) do i, fraction
+    magnet   = MAGNETS[i]
+    strength = fraction * magnet.strength_max
 
-    c0 = zeros(length(xin), 6); c0[:, 1] .= xin
-    linepass!(c0, Lattice(AbstractElement[mag]), beam, zeros(Int, length(xin)))
+    # Panel 1: send a fine comb of offsets through the magnet alone and read off
+    # the exit angle. Every particle starts parallel to the axis (pₓ = 0), so the
+    # exit pₓ IS the kick.
+    comb = zeros(length(offsets_fine), 6)
+    comb[:, IX] .= offsets_fine
+    linepass!(comb, Lattice(AbstractElement[magnet.build(L_MAGNET, strength)]),
+              beam, zeros(Int, length(offsets_fine)))
+    kick = comb[:, IPX]
 
-    pieces = AbstractElement[Drift(0.1) for _ in 1:5]
-    append!(pieces, [make(Lm/4, g) for _ in 1:4])
-    append!(pieces, [Drift(0.15)    for _ in 1:14])
-    cf = zeros(length(xfan), 6); cf[:, 1] .= xfan
-    S, X, _ = track_s(pieces, beam, cf)
+    # Panel 2: the same magnet inside a beamline, so the rays can be watched.
+    drift_before = [Drift(0.1)  for _ in 1:5]
+    magnet_parts = [magnet.build(L_MAGNET/N_SLICES, strength) for _ in 1:N_SLICES]
+    drift_after  = [Drift(0.15) for _ in 1:14]
+    beamline = AbstractElement[drift_before..., magnet_parts..., drift_after...]
+
+    fan = zeros(length(offsets_fan), 6)
+    fan[:, IX] .= offsets_fan
+    s, states = track_and_record(beamline, beam, fan)
+
+    rays = [line(s, trajectory(states, j, IX) .* 1e3; panel=2,
+                 color=PALETTE[i], alpha=0.85, width=1.4)
+            for j in eachindex(offsets_fan)]
+
+    # Report the kick at two offsets; a factor-of-3 step in x shows the power law.
+    at_5mm  = argmin(abs.(offsets_fine .- 5e-3))
+    at_15mm = argmin(abs.(offsets_fine .- 15e-3))
 
     (series = vcat(
-        [line(xin .* 1e3, c0[:, 2] .* 1e3; panel=1, color=PALETTE[i], label=name)],
-        [line(S, X[j, :] .* 1e3; panel=2, color=PALETTE[i], alpha=0.85, width=1.4)
-         for j in eachindex(xfan)],
-        [line([0.5, 0.5, nothing, 0.7, 0.7], [-20.0, 20.0, nothing, -20.0, 20.0];
-              panel=2, color="#9aa4b2", dash=true, width=1, label="magnet")]),
-     readouts = [unit => round(g; sigdigits=4),
-                 "scaling" => law,
-                 "Δpₓ at x = 5 mm"  => string(round(1e3*c0[findmin(abs.(xin .- 5e-3))[2], 2];
-                                                    sigdigits=3), " mrad"),
-                 "Δpₓ at x = 15 mm" => string(round(1e3*c0[end, 2]; sigdigits=3), " mrad")])
+        [line(offsets_fine .* 1e3, kick .* 1e3; panel=1, color=PALETTE[i],
+              label=magnet.name)],
+        rays,
+        [line(magnet_marker(-20.0, 20.0)...; panel=2, color="#9aa4b2", dash=true,
+              width=1, label="magnet")]),
+     readouts = [magnet.unit => round(strength; sigdigits=4),
+                 "scaling"   => magnet.law,
+                 "Δpₓ at x = 5 mm"  => string(round(kick[at_5mm]  * 1e3; sigdigits=3), " mrad"),
+                 "Δpₓ at x = 15 mm" => string(round(kick[at_15mm] * 1e3; sigdigits=3), " mrad")])
 end
 ```
 
