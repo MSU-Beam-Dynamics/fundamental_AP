@@ -171,27 +171,32 @@ ones below, following the sign of each glyph's `height`; bends and other
 `centered` glyphs straddle it, and drifts are the baseline itself.
 
 `span` is the length of the line, either a number or an `(s0, s1)` tuple.
-The panel's `ylim` must be `(0, ymax)`, and `ymax` should exceed the data by at
-least `strip` plus some headroom so the band has room of its own — the usual
-choice is `ymax = datamax/(1 - strip - headroom)`.
+`offset` shifts every glyph along `s`, for a line whose plotted coordinate does
+not start at zero.  Give `ymax` when the panel runs `(0, ymax)`, or
+`ylim = (lo, hi)` for a panel that does not start at zero; either way the band occupies the top `strip` of
+that range, so leave the data some headroom below it — the usual choice is
+`ymax = datamax/(1 - strip - headroom)`.
 
 The series carry no labels, so the beamline never enters the legend. Only the
 glyph fields are read, so this stays free of any TrackPad dependency.
 """
 function lattice_strip(glyphs, span; panel::Int = 1, ymax::Real = 1.0,
-                       strip::Real = 0.09, colors = LATTICE_COLORS,
-                       width::Real = 1.6, baseline::AbstractString = "#9aa4b2")
+                       ylim = nothing, offset::Real = 0.0, strip::Real = 0.09,
+                       colors = LATTICE_COLORS, width::Real = 1.6,
+                       baseline::AbstractString = "#9aa4b2")
     s0, s1 = span isa Tuple ? span : (zero(span), span)
-    base = ymax * (1 - strip/2)
-    half = ymax * strip / 2
+    ylo, yhi = ylim === nothing ? (zero(float(ymax)), float(ymax)) : (float(ylim[1]), float(ylim[2]))
+    height = yhi - ylo
+    base = yhi - height * strip / 2
+    half = height * strip / 2
     out = Any[line([s0, s1], [base, base]; panel, color = baseline, width = 1.2, alpha = 0.7)]
     for g in glyphs
         h = Float64(g.height)
         lo, hi = g.centered ? (base - abs(h)*half/2, base + abs(h)*half/2) :
                  h >= 0     ? (base, base + h*half) : (base + h*half, base)
         col = get(colors, g.kind, get(colors, :element, "#5b6472"))
-        push!(out, line([g.plot_start, g.plot_start, g.plot_end, g.plot_end, g.plot_start],
-                        [lo, hi, hi, lo, lo]; panel, color = col, width))
+        a, b = g.plot_start + offset, g.plot_end + offset
+        push!(out, line([a, a, b, b, a], [lo, hi, hi, lo, lo]; panel, color = col, width))
     end
     out
 end

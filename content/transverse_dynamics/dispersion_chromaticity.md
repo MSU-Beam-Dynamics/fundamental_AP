@@ -240,52 +240,57 @@ using TrackPad, TrackPadWidgets, Random, Statistics
 
 const NCH   = 245                # particles, 35 per colour band
 const NBAND = 7                  # δ bands, blue (low momentum) → red (high)
-const σX    = 0.8e-3             # rms beam size at the entrance [m]
-const σPX   = 0.04e-3            # rms divergence [rad] — almost parallel
 const LQCH  = 0.1                # quadrupole length [m], centred on s = 0
 const ARM   = 1.0 - LQCH/2       # drift on each side, so s runs −1 m → +1 m
+# β = 20 m with ε = 32 nm·rad puts 0.8 mm and 0.04 mrad at the entrance: a bunch
+# wide enough to see and divergent enough to ignore, i.e. essentially parallel.
+const ENTCH = optics4DUC(20.0, 0.0, 20.0, 0.0)
+const EMCH  = 32e-9
 
 # Blue → grey → red, chosen to stay legible on both book themes (a bwr ramp's
 # white middle disappears on the light background).
 const BANDS = ["#2166ac", "#4393c3", "#92c5de", "#9aa4b2", "#f4a582", "#d6604d", "#b2182b"]
 
-# One fixed draw, reused by every frame: the knob scales δ rather than redrawing
-# it, so a particle keeps its identity — and its colour — as the spread opens.
-const RNG   = MersenneTwister(7)
-const X0    = randn(RNG, NCH) .* σX
-const PX0   = randn(RNG, NCH) .* σPX
-const U     = repeat(range(-1.0, 1.0, length=NBAND), inner=NCH ÷ NBAND)  # δ/δmax
-const BANDOF = repeat(1:NBAND, inner=NCH ÷ NBAND)
+"The line as a TrackPad lattice, split so s = ±1 and the quadrupole centre are boundaries."
+ch_lattice(k1) = Lattice(AbstractElement[
+    Drift(ARM), Quadrupole(LQCH/2, k1; name=:Q), Quadrupole(LQCH/2, k1; name=:Q),
+    Drift(ARM)]; name=:chromdemo)
 
-"Slice the line so s = −1, the quadrupole centre, and s = +1 are all boundaries."
-ch_pieces(k1) = AbstractElement[
-    Drift(ARM), Quadrupole(LQCH/2, k1), Quadrupole(LQCH/2, k1), Drift(ARM)]
+"A Gaussian bunch matched to the entrance optics, with a chosen rms momentum spread."
+ch_beam(σδ) = matched_gaussian(MersenneTwister(7), NCH, ENTCH;
+                               emitx=EMCH, emity=EMCH,
+                               longitudinal=[0.01^2 0.0; 0.0 σδ^2])
 
-"Track every particle, keeping x and pₓ at each of the five boundaries."
-function ch_track(k1, δmax)
-    c = zeros(NCH, 6)
-    c[:, 1] .= X0; c[:, 2] .= PX0; c[:, 6] .= U .* δmax
-    flags = zeros(Int, NCH)
+"Track through the lattice, keeping every coordinate at each element boundary."
+function ch_track(k1, σδ)
+    c = ch_beam(σδ); flags = zeros(Int, NCH)
     S = Float64[-1.0]; C = [copy(c)]
-    for e in ch_pieces(k1)
+    for e in ch_lattice(k1)
         linepass!(c, Lattice(AbstractElement[e]), beam, flags)
         push!(S, S[end] + get_length(e)); push!(C, copy(c))
     end
     S, C
 end
 
+"Split the bunch into equal-population bands ordered by momentum."
+band_index(c) = (p = sortperm(c[:, 6]); b = zeros(Int, length(p));
+                 for (rank, i) in enumerate(p); b[i] = min(NBAND, 1 + (rank-1)*NBAND ÷ length(p)); end; b)
+
+const CHYL   = (-4.5, 4.5)      # σ_δ is a Gaussian rms, so the tails reach past 3 mm
+BEAMLINE_CH = lattice_strip(lattice_plot_data(ch_lattice(14.3)), (-1.0, 1.0);
+                            ylim=CHYL, offset=-1.0)
+
+SPREAD = [0.0, 0.05, 0.10, 0.15, 0.20]                # rms δ
 FOCAL  = [0.5, 0.7, 1.0]                              # nominal focal length [m]
-SPREAD = [0.0, 0.05, 0.10, 0.15, 0.20]                # δ half-width
 
 explorer(
     title   = "One quadrupole, one bunch: the focal point smears with momentum",
-    sliders = [Knob("δ half-width", SPREAD;
-                    fmt = d -> string("±", round(Int, d*100), "%"), init = 5),
+    sliders = [Knob("σ_δ", SPREAD; fmt = d -> string(round(Int, d*100), " %"), init = 5),
                Knob("focal length [m]", FOCAL;
                     fmt = f -> string(round(f; digits=2)), init = 2)],
     panels  = [Panel(xlabel="s [m]", ylabel="x [mm]",
                      title="trajectories, coloured by momentum offset",
-                     xlim=(-1.0, 1.0), ylim=(-3.0, 3.0), height=320,
+                     xlim=(-1.0, 1.0), ylim=CHYL, height=320,
                      legend=:bottomleft, basis="100%"),
                Panel(title="(x, pₓ) at s = −1 m", autoscale=:frame, share="chr",
                      height=175, basis="31%", minwidth=150, ticklabels=false),
@@ -293,23 +298,22 @@ explorer(
                      height=175, basis="31%", minwidth=150, ticklabels=false),
                Panel(title="(x, pₓ) at s = +1 m", autoscale=:frame, share="chr",
                      height=175, basis="31%", minwidth=150, ticklabels=false)],
-    note = "Every particle enters with the same optics and differs only in momentum. "*
-           "TrackPad applies the same pₓ kick to all of them — it is the drift that "*
-           "divides by (1+δ), so the stiffer particles turn through a smaller angle and "*
-           "focus further downstream. Set the spread to zero and the whole fan collapses "*
-           "to one focal point; open it and the point becomes a segment. The three "*
-           "insets share one x/pₓ box so the clouds can be compared directly.",
-) do δmax, f
+    statics = BEAMLINE_CH,
+    note = "The bunch is a Gaussian matched to β = 20 m at the entrance, so it arrives "*
+           "0.8 mm wide and almost parallel. TrackPad gives every particle the same pₓ "*
+           "kick — it is the drift that divides by (1+δ), so stiffer particles turn "*
+           "through a smaller angle and focus further downstream. Set σ_δ to zero and "*
+           "the fan collapses to one focal point; open it and the point becomes a "*
+           "segment. The three insets share one x/pₓ box.",
+) do σδ, f
     k1 = 1/(f*LQCH)
-    S, C = ch_track(k1, δmax)
+    S, C = ch_track(k1, σδ)
+    bands = band_index(C[1])
 
-    # One polyline per colour band, particles separated by a pen lift.
     traj = map(1:NBAND) do b
         xs = Union{Float64,Nothing}[]; ys = Union{Float64,Nothing}[]
-        for i in findall(==(b), BANDOF)
-            for j in eachindex(S)
-                push!(xs, S[j]); push!(ys, C[j][i, 1]*1e3)
-            end
+        for i in findall(==(b), bands)
+            for j in eachindex(S); push!(xs, S[j]); push!(ys, C[j][i, 1]*1e3); end
             push!(xs, nothing); push!(ys, nothing)
         end
         line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.55,
@@ -320,24 +324,150 @@ explorer(
                      round.(C[j][idx, 2] .* 1e3; sigdigits=4);
                      panel=p, color=BANDS[b], size=2.6, alpha=0.55)
               for (p, j) in zip(2:4, (1, 3, 5))
-              for (b, idx) in enumerate([findall(==(bb), BANDOF) for bb in 1:NBAND])]
+              for (b, idx) in enumerate([findall(==(bb), bands) for bb in 1:NBAND])]
 
-    xend = [C[end][i, 1] for i in 1:NCH]
-    (series = vcat(traj,
-        [line([-LQCH/2, -LQCH/2, nothing, LQCH/2, LQCH/2], [-3.0, 3.0, nothing, -3.0, 3.0];
-              panel=1, color="#9aa4b2", dash=true, width=1, label="quadrupole")],
-        insets),
+    (series = vcat(traj, insets),
      readouts = ["nominal f"        => string(round(f; digits=2), " m"),
                  "k₁"               => string(round(k1; digits=3), " m⁻²"),
-                 "δ half-width"     => string("±", round(Int, δmax*100), " %"),
+                 "σ_δ"              => string(round(Int, σδ*100), " %"),
                  "σₓ at entrance"   => string(round(std(C[1][:,1])*1e3; sigdigits=3), " mm"),
-                 "σₓ at s = +1 m"   => string(round(std(xend)*1e3; sigdigits=3), " mm"),
-                 "focus of δ = −δmax" => string(round(f*(1-δmax); sigdigits=3), " m"),
-                 "focus of δ = +δmax" => string(round(f*(1+δmax); sigdigits=3), " m")])
+                 "σₓ′ at entrance"  => string(round(std(C[1][:,2])*1e3; sigdigits=3), " mrad"),
+                 "focus of δ = −σ_δ" => string(round(f*(1-σδ); sigdigits=3), " m"),
+                 "focus of δ = +σ_δ" => string(round(f*(1+σδ); sigdigits=3), " m")])
 end
 ```
 
 
+
+### Why a sextupole fixes it
+
+A sextupole kicks as $\Delta p_x \propto -(x^2-y^2)$, which is useless on axis.
+Put it where the beam is **dispersive**, though, so that $x=x_\beta+D\delta$, and
+the square produces a cross term $\propto D\,\delta\,x_\beta$ — a kick
+proportional to the betatron amplitude *and* to the momentum offset. That is a
+quadrupole whose strength tracks $\delta$, which is exactly the error the
+chromatic quadrupole made. Launch the same bunch with an initial dispersion and
+watch the fan of focal points close up:
+
+```{code-cell} julia
+:tags: [hide-input]
+
+using TrackPad, TrackPadWidgets, Random, Statistics
+
+const LSX  = 0.1                 # sextupole length [m]
+const SGDL = 0.02                # rms momentum spread for this demo
+const K1SX = 1/(0.7*LQCH)        # the same 0.7 m quadrupole as above
+
+"Drift, sextupole, quadrupole, drift — s = 0 at the quadrupole centre."
+sx_lattice(k2) = Lattice(AbstractElement[
+    Drift(ARM - LSX), Sextupole(LSX, k2; name=:S),
+    Quadrupole(LQCH/2, K1SX; name=:Q), Quadrupole(LQCH/2, K1SX; name=:Q),
+    Drift(ARM)]; name=:sextdemo)
+
+"The same matched bunch, but launched with dispersion D: x = x_β + Dδ."
+sx_beam(D) = matched_gaussian(MersenneTwister(11), NCH, ENTCH;
+                              emitx=EMCH, emity=EMCH,
+                              longitudinal=[0.01^2 0.0; 0.0 SGDL^2],
+                              dispersion=[D, 0.0, 0.0, 0.0])
+
+function sx_track(k2, D)
+    c = sx_beam(D); flags = zeros(Int, NCH)
+    S = Float64[-1.0]; C = [copy(c)]
+    for e in sx_lattice(k2)
+        linepass!(c, Lattice(AbstractElement[e]), beam, flags)
+        push!(S, S[end] + get_length(e)); push!(C, copy(c))
+    end
+    S, C
+end
+
+"""
+Where each momentum band comes to a betatron waist, drifting on from `c`.
+
+Each band still spans a little δ, and with dispersion that alone smears x by
+several mm — far more than the 0.8 mm betatron beam — so the band's own linear
+x(δ) and pₓ(δ) trend is removed first. Without that the metric would report a
+difference between D = 0 and D = 0.5 at k₂ = 0, where the lattices are identical.
+"""
+function band_waists(c, bands)
+    sg = range(0.0, 1.6, length=161)
+    map(1:NBAND) do b
+        idx = findall(==(b), bands)
+        x, px, d = c[idx,1], c[idx,2], c[idx,6]
+        dd = d .- mean(d); den = sum(dd.^2)
+        if den > 0
+            x  = x  .- (sum(dd .* (x  .- mean(x)))/den) .* dd
+            px = px .- (sum(dd .* (px .- mean(px)))/den) .* dd
+        end
+        env = [std(x .+ s .* px ./ (1 .+ d)) for s in sg]
+        sg[argmin(env)]
+    end
+end
+
+const SXYL  = (-30.0, 30.0)
+BEAMLINE_SX = lattice_strip(lattice_plot_data(sx_lattice(50.0)), (-1.0, 1.0);
+                            ylim=SXYL, offset=-1.0)
+
+K2S = collect(range(0.0, 100.0, length=11))
+DS  = [0.0, 0.25, 0.5]
+
+explorer(
+    title   = "A sextupole in a dispersive spot undoes the chromatic focusing error",
+    sliders = [Knob("k₂ [m⁻³]", K2S; fmt = k -> string(round(Int, k)), init = 1),
+               Knob("initial dispersion D [m]", DS;
+                    fmt = d -> string(round(d; digits=2)), init = 3)],
+    panels  = [Panel(xlabel="s [m]", ylabel="x [mm]",
+                     title="trajectories, coloured by momentum offset",
+                     xlim=(-1.0, 1.0), ylim=SXYL, height=300,
+                     legend=:bottomleft, basis="100%"),
+               Panel(xlabel="band mean δ", ylabel="waist position [m]",
+                     title="where each momentum band focuses",
+                     xlim=(-0.05, 0.05), ylim=(0.45, 0.9), height=260,
+                     legend=:bottomleft, basis="100%")],
+    statics = vcat(BEAMLINE_SX,
+                   [line([-0.05, 0.05], [0.7, 0.7]; panel=2, color="#9aa4b2",
+                         dash=true, width=1.2, label="on-momentum focus")]),
+    note = "With D = 0 the sextupole sits on the beam axis and cannot help: the lower "*
+           "curve keeps its slope whatever k₂ does. Give the bunch dispersion and the "*
+           "slope — which is the chromaticity — can be driven to zero, then past it into "*
+           "over-correction. Only the product k₂·D matters, so halving D doubles the k₂ "*
+           "needed. The waist is measured on each band's betatron residual, with its own "*
+           "x(δ) trend removed, so the lower panel shows focusing and not the dispersion "*
+           "itself. The sextupole is still nonlinear: it flattens the slope, not the "*
+           "curvature.",
+) do k2, D
+    S, C = sx_track(k2, D)
+    bands = band_index(C[1])
+    δmean = [mean(C[1][findall(==(b), bands), 6]) for b in 1:NBAND]
+    waist = band_waists(C[end-1], bands)          # state at the quadrupole exit
+
+    traj = map(1:NBAND) do b
+        xs = Union{Float64,Nothing}[]; ys = Union{Float64,Nothing}[]
+        for i in findall(==(b), bands)
+            for j in eachindex(S); push!(xs, S[j]); push!(ys, C[j][i, 1]*1e3); end
+            push!(xs, nothing); push!(ys, nothing)
+        end
+        line(xs, ys; panel=1, color=BANDS[b], width=0.9, alpha=0.5,
+             label = b == 1 ? "δ < 0" : b == NBAND ? "δ > 0" : nothing)
+    end
+
+    # slope of waist position against δ — the chromaticity of this little line
+    δ̄, w̄ = mean(δmean), mean(waist)
+    slope = sum((δmean .- δ̄) .* (waist .- w̄)) / sum((δmean .- δ̄).^2)
+
+    (series = vcat(traj,
+        [line(δmean, waist; panel=2, color="#5b6472", width=1.4)],
+        [points([δmean[b]], [waist[b]]; panel=2, color=BANDS[b], size=7.0)
+         for b in 1:NBAND]),
+     readouts = ["k₂"              => string(round(Int, k2), " m⁻³"),
+                 "D"               => string(round(D; digits=2), " m"),
+                 "k₂·D"            => string(round(k2*D; digits=1), " m⁻²"),
+                 "σₓ at entrance"  => string(round(std(C[1][:,1])*1e3; sigdigits=3), " mm"),
+                 "waist spread"    => string(round(maximum(waist)-minimum(waist); digits=3), " m"),
+                 "d(waist)/dδ"     => string(round(slope; digits=2), " m per unit δ"),
+                 "verdict"         => abs(slope) < 0.2 ? "corrected" :
+                                      slope > 0 ? "under-corrected" : "over-corrected"])
+end
+```
 
 Both dispersion and chromaticity are inevitable in lattices containing dipoles
 and quadrupoles, and many beam-dynamics problems stem from them, so their
