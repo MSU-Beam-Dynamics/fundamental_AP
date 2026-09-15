@@ -42,7 +42,7 @@ $$
 \epsilon_\text{rms} = \sqrt{\det(\sigma)} = \sqrt{\sigma_x^2\sigma_{x'}^2-\sigma_{xx'}^2}.
 $$
 
-If the beam is Gaussian and matched to the lattice, then the $\sigma$-matrix is proportional to the Twiss matrix:
+If the beam is Gaussian and matched to the lattice, then the $\sigma$-matrix is proportional to the Courant–Snyder matrix:
 
 $$
 \sigma = \epsilon_\text{rms} \begin{bmatrix}
@@ -51,9 +51,9 @@ $$
 \end{bmatrix}.
 $$
 
-However, it is not necessary that the beam is matched to the lattice.  In this case, the twiss parameter only reflects the shape/orientation of the beam distribution in the phase space.  The emittance calculated is usually refered as the geometric emittance. 
+However, it is not necessary that the beam is matched to the lattice.  In this case, the Courant–Snyder parameters only reflect the shape/orientation of the beam distribution in the phase space.  The emittance calculated is usually refered as the geometric emittance. 
 
-However, the lattice design may have an alternative shape and orientation, charecterized by the lattice twiss parameter, as it is only determined by the lattice structure and not by the beam properties. One may calculate another beam emittance, sometimes referred as the effective emittance, to characterize the phase space area needed to accomodate the mismatched beam.
+However, the lattice design may have an alternative shape and orientation, charecterized by the lattice Courant–Snyder parameters, as they are only determined by the lattice structure and not by the beam properties. One may calculate another beam emittance, sometimes referred as the effective emittance, to characterize the phase space area needed to accomodate the mismatched beam.
 
 One can prove that both the geometric emittance and the effective emittance are invariants of linear transport, meaning that they do not change as the beam propagates through a linear lattice.
 

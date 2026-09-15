@@ -9,7 +9,7 @@ The notes are organized in three parts:
 1. **Math Preparation** — linear algebra, relativistic mechanics, differential
    equations, and vector calculus, with numerical examples in Julia.
 2. **Transverse Dynamics** — magnets and multipoles, Hill's equation, transfer
-   matrices, Twiss functions, FODO cells, emittance, coupling, dispersion and
+   matrices, Courant–Snyder functions, FODO cells, emittance, coupling, dispersion and
    chromaticity. Simulations are included for better illustration using
    TrackPad.jl.
 3. **Longitudinal Dynamics in a Ring** — RF acceleration, the longitudinal turn-by-turn

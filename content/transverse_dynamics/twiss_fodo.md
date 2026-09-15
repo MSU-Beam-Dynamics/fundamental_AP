@@ -4,12 +4,14 @@ kernelspec:
   display_name: Julia (TrackPad — Fundamental AP)
 ---
 
-# Twiss Parametrization and the FODO Cell
+# Courant–Snyder Parametrization and the FODO Cell
 
-## Twiss parametrization
+## Courant–Snyder parametrization
 
 To separate the description of transverse motion into a *lattice* part and a
-*particle* part we adopt the **Twiss parametrization**. For a periodical
+*particle* part we adopt the **Courant–Snyder parametrization**, after Ernest Courant
+and Hartland Snyder; much of the literature calls the same quantities the
+*Twiss parameters*. For a periodical
 lattice the one-turn matrix is written as
 
 $$
@@ -19,7 +21,7 @@ M=\begin{pmatrix}
 \end{pmatrix}
 $$
 
-where $\beta(s)$, $\alpha(s)$ and $\gamma(s)$ are the **Twiss functions** that
+where $\beta(s)$, $\alpha(s)$ and $\gamma(s)$ are the **Courant–Snyder functions** that
 depend only on the lattice, and $\Phi$ is the phase advance per period. They
 satisfy
 
@@ -66,10 +68,10 @@ M\left(s_{1}\mid s_{0}\right)
 \end{pmatrix}.
 $$
 
-### The Twiss form is the general symplectic matrix
+### The Courant–Snyder form is the general symplectic matrix
 
 Writing $M$ this way is not merely a change of variables. Any $2\times2$ matrix
-of the Twiss form is automatically symplectic,
+of the Courant–Snyder form is automatically symplectic,
 
 $$
 \det M=\cos^{2}\Phi-\alpha^{2}\sin^{2}\Phi+\beta\gamma\sin^{2}\Phi=1
@@ -81,7 +83,7 @@ the one-turn map repeatedly. Drag the **turn** knob to step the particle one
 turn at a time, or press ▶ play to watch it hop: the start point stays marked,
 the turns already taken fade into the background, and the current position is
 highlighted. Every point lands on the same invariant ellipse, the one predicted
-by the Twiss parameters at the observation point.
+by the Courant–Snyder parameters at the observation point.
 
 ```{code-cell} julia
 :tags: [hide-input]
@@ -98,12 +100,12 @@ const ELLIPSE_ANGLES = range(0, 2π, length=33)
 plotdata(v) = round.(v; sigdigits=4)
 
 """
-    twiss_matrix(β, α, Φ)
+    cs_matrix(β, α, Φ)
 
-The one-turn map written in Twiss form. Its determinant is 1 and its trace is
+The one-turn map written in Courant–Snyder form. Its determinant is 1 and its trace is
 2cos Φ for any (β, α), which is the whole point of the parametrisation.
 """
-function twiss_matrix(β, α, Φ)
+function cs_matrix(β, α, Φ)
     γ = (1 + α^2)/β
     return [cos(Φ) + α*sin(Φ)    β*sin(Φ)
            -γ*sin(Φ)             cos(Φ) - α*sin(Φ)]
@@ -120,7 +122,7 @@ function invariant_ellipse(β, α, J)
 end
 
 explorer(
-    title   = "A Twiss-form one-turn map preserves its own ellipse",
+    title   = "A Courant–Snyder-form one-turn map preserves its own ellipse",
     # `turn` is the first knob, so the ▶ play button walks the particle around
     # the ellipse; drag it by hand to step turn by turn.
     sliders = [Knob("turn", 0:MAX_TURN; fmt = n -> string(n), init = 9),
@@ -141,7 +143,7 @@ explorer(
            "particle never leaves the one it started on.",
 ) do turn, β, α, Φ_deg
     Φ = deg2rad(Φ_deg)
-    M = twiss_matrix(β, α, Φ)
+    M = cs_matrix(β, α, Φ)
 
     # Launch at (1, 0) and apply the map `turn` times, keeping the whole history.
     position = [1.0, 0.0]
@@ -217,7 +219,7 @@ $$
 \sin{\frac{\Phi}{2}}=\frac{L_1}{2f},
 $$
 
-with Twiss parameters at the focusing-quad midpoint
+with Courant–Snyder parameters at the focusing-quad midpoint
 
 $$
 \beta_F  = \frac{M_{12}}{\sin\Phi}=\frac{2L_1\left(1+\sin(\Phi/2)\right)}{\sin\Phi},
@@ -438,7 +440,7 @@ end
 
 beta_max = maximum(max.(twiss.betax, twiss.betay))
 fig, ax = twiss_figure(ring, beta_max; ylabel="β [m]",
-                       title="FODO cell Twiss functions")
+                       title="FODO cell Courant–Snyder functions")
 lines!(ax, twiss.s, twiss.betax; linewidth=2, label="βₓ")
 lines!(ax, twiss.s, twiss.betay; linewidth=2, label="βᵧ")
 axislegend(ax; position=:rb)      # the top of the box now belongs to the beamline

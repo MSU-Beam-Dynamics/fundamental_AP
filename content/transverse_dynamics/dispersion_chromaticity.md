@@ -41,7 +41,7 @@ $$
 Dispersion obeys the same equation as $x$ but is driven only by dipoles —
 quadrupoles modify it but do not create it. 
 
-Below is an example of a simple FODO lattice with two dipoles per cell, with the twiss parameters and the dispersion function plotted along the cell. 
+Below is an example of a simple FODO lattice with two dipoles per cell, with the Courant–Snyder parameters and the dispersion function plotted along the cell. 
 
 ```{code-cell} julia
 :tags: [hide-input]
@@ -89,7 +89,7 @@ explorer(
     sliders = [Knob("bend angle per dipole [deg]", ANGLES;
                     fmt = a -> string(round(a; digits=1), "°"), init = 5)],
     panels  = [Panel(xlabel="s [m]", ylabel="β [m]", y2label="Dₓ [m]",
-                     title="Twiss functions and dispersion along the cell",
+                     title="Courant–Snyder functions and dispersion along the cell",
                      ylim=(0.0, BMAX), y2lim=(0.0, 3.2), height=320,
                      legend=:bottomleft, basis="100%")],
     statics = BEAMLINE,
