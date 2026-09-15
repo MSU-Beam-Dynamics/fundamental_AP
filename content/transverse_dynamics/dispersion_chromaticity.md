@@ -466,9 +466,11 @@ function band_waists(c, bands)
     end
 end
 
-const SXYL  = (-30.0, 30.0)
-BEAMLINE_SX = lattice_strip(lattice_plot_data(sx_lattice(50.0)), (-1.0, 1.0);
-                            ylim=SXYL, offset=-1.0)
+# The dispersive beam is 30 mm across at D = 0.5 m and 4 mm at D = 0, so a fixed
+# axis would either clip one or flatten the other into a thread. The panel scales
+# to the frame instead, and the beamline band is rebuilt to match — it has to be,
+# since lattice_strip places the glyphs relative to the axis range it is given.
+const SXHEAD = 0.70          # fraction of the half-range the data may occupy
 
 K2S = collect(range(0.0, 100.0, length=11))
 DS  = [0.0, 0.25, 0.5]
@@ -480,15 +482,16 @@ explorer(
                     fmt = d -> string(round(d; digits=2)), init = 3)],
     panels  = [Panel(xlabel="s [m]", ylabel="x [mm]",
                      title="trajectories, coloured by momentum offset",
-                     xlim=(-1.0, 1.0), ylim=SXYL, height=300,
+                     xlim=(-1.0, 1.0), autoscale=:frame, height=300,
                      legend=:bottomleft, basis="100%"),
                Panel(xlabel="band mean δ", ylabel="waist position [m]",
                      title="where each momentum band focuses",
-                     xlim=(-0.05, 0.05), ylim=(0.45, 0.9), height=260,
+                     # fixed, unlike the panel above: comparing the slope across
+                     # settings is the point, and the waists span 0.59-0.72 m
+                     xlim=(-0.05, 0.05), ylim=(0.56, 0.76), height=260,
                      legend=:bottomleft, basis="100%")],
-    statics = vcat(BEAMLINE_SX,
-                   [line([-0.05, 0.05], [0.7, 0.7]; panel=2, color="#9aa4b2",
-                         dash=true, width=1.2, label="on-momentum focus")]),
+    statics = [line([-0.05, 0.05], [0.7, 0.7]; panel=2, color="#9aa4b2",
+                    dash=true, width=1.2, label="on-momentum focus")],
     note = "With D = 0 the sextupole sits on the beam axis and cannot help: the lower "*
            "curve keeps its slope whatever k₂ does. Give the bunch dispersion and the "*
            "slope — which is the chromaticity — can be driven to zero, then past it into "*
@@ -517,7 +520,13 @@ explorer(
     δ̄, w̄ = mean(δmean), mean(waist)
     slope = sum((δmean .- δ̄) .* (waist .- w̄)) / sum((δmean .- δ̄).^2)
 
-    (series = vcat(traj,
+    # Zoom to this frame, then lay the beamline band in the space above the data.
+    xall  = maximum(maximum(abs, C[j][:, 1]) for j in eachindex(C)) * 1e3
+    ytop  = xall / SXHEAD
+    strip = lattice_strip(lattice_plot_data(sx_lattice(k2)), (-1.0, 1.0);
+                          ylim=(-ytop, ytop), offset=-1.0)
+
+    (series = vcat(traj, strip,
         [line(δmean, waist; panel=2, color="#5b6472", width=1.4)],
         [points([δmean[b]], [waist[b]]; panel=2, color=BANDS[b], size=7.0)
          for b in 1:NBAND]),
