@@ -57,8 +57,8 @@ based on RHIC parameters:
 
 | Parameter | Value |
 | :--- | ------: |
-| Injection energy | 20 GeV (kinetic) |
-| Top energy | 250 GeV |
+| Injection energy | 20 GeV (total) |
+| Top energy | 250 GeV (total) |
 | Mass | 0.938 GeV |
 | RF voltage | 5 MV |
 | RF frequency | 28.15 MHz |
@@ -72,57 +72,67 @@ families of particles at both energies:
 using CairoMakie
 
 """
-    longitudinal_map(turns, φ₀, ΔE₀; ...)
+    longitudinal_map(turns, φ₀, ΔE₀; sin_φs, αc, E0_tot, mass, V, h, ramp=false)
 
-Turn-by-turn longitudinal map in (φ, ΔE) with slip factor held constant.
-Returns (Φ_hist, ΔE_hist), each (turns+1) × nparticles.
+Turn-by-turn longitudinal map in (φ, ΔE), with ΔE in eV. With `ramp=true` the
+reference energy grows by eV sin φs every turn and β², η follow it; otherwise
+they stay constant. Returns `(φ, ΔE, δ)`, each (turns+1) × nparticles, where
+δ = ΔE/(β²E₀) is taken against the reference energy of that turn.
 """
 function longitudinal_map(turns, φ₀, ΔE₀; sin_φs=0.5, αc=0.0018,
-                          E0_tot=250e9, mass=0.938e9, V=5e6, h=360)
-    γ0  = E0_tot/mass
-    β²  = 1 - 1/γ0^2
-    η   = αc - 1/γ0^2                       # slip factor
-    φ, ΔE = copy(φ₀), copy(ΔE₀)
-    Φh, Eh = [copy(φ)], [copy(ΔE)]
+                          E0_tot=250e9, mass=0.938e9, V=5e6, h=360, ramp=false)
+    E  = E0_tot
+    β² = 1 - (mass/E)^2
+    φ, ΔE = float.(φ₀), float.(ΔE₀)            # work on copies
+    Φh, Eh, δh = [copy(φ)], [copy(ΔE)], [ΔE ./ (β²*E)]
     for _ in 1:turns
-        ΔE .+= V .* (sin.(φ) .- sin_φs)
-        φ  .+= (2π*h*η/(β²*E0_tot)) .* ΔE   # uses UPDATED energy ⇒ area preserving
-        push!(Φh, copy(φ)); push!(Eh, copy(ΔE))
+        ΔE .+= V .* (sin.(φ) .- sin_φs)         # RF kick
+        ramp && (E += V*sin_φs)                 # the reference gains eV sin φs
+        γ  = E/mass
+        β² = 1 - 1/γ^2
+        η  = αc - 1/γ^2                         # slip factor
+        φ .+= (2π*h*η/(β²*E)) .* ΔE             # uses UPDATED energy ⇒ area preserving
+        push!(Φh, copy(φ)); push!(Eh, copy(ΔE)); push!(δh, ΔE ./ (β²*E))
     end
-    return reduce(hcat, Φh)', reduce(hcat, Eh)'
+    rows(hist) = permutedims(reduce(hcat, hist))
+    return rows(Φh), rows(Eh), rows(δh)
 end
 
 mass, αc, V, h = 0.938e9, 0.0018, 5e6, 360
 sin_φs = 0.5; φs = asin(sin_φs)
 turns = 2100; npar = 5
 
-fig = Figure(size=(900, 380))
+fig = Figure(size=(900, 420))
 for (panel, (label, E0_tot)) in enumerate([("250 GeV (above transition)", 250e9), ("20 GeV (below transition)", 20e9)])
     γ = E0_tot/mass; β² = 1-1/γ^2; η = αc-1/γ^2
-    # bucket half-height estimate for axis scaling
+    # bucket half-height, in δ = ΔE/(β²E₀): sets the starting points and the axes
     yf = √(cos(φs) - (π-2φs)*sin(φs)/2)
     height = 2*√(V/(2π*β²*E0_tot*h*abs(η)))*yf
+    toΔE = β²*E0_tot                        # the map runs in ΔE [eV]
+    pars = (; sin_φs, αc, E0_tot, mass, V, h)
 
-    # family near the UNSTABLE fixed point π−φs (drifts out or gets extracted)
-    Φu = fill(π-φs, npar); Eu = collect(range(height/npar, 0.99height; length=npar))
-    Hu = longitudinal_map(turns, Φu, Eu; sin_φs=sin_φs, αc=αc, E0_tot=E0_tot, mass=mass, V=V, h=h)
-    # family near the STABLE fixed point φs
-    Φs = fill(φs, npar); Es = collect(range(0, 0.99height; length=npar))
-    Hs = longitudinal_map(turns, Φs, Es; sin_φs=sin_φs, αc=αc, E0_tot=E0_tot, mass=mass, V=V, h=h)
+    # one family starts at π−φs, the other at φs; the sign of η decides which stays bounded
+    Hu = longitudinal_map(turns, fill(π-φs, npar),
+                          collect(range(height/npar, 0.99height; length=npar)) .* toΔE; pars...)
+    Hs = longitudinal_map(turns, fill(φs, npar),
+                          collect(range(0, 0.99height; length=npar)) .* toΔE; pars...)
 
-    ax = Axis(fig[1, panel]; limits=((-π, 2π), (-2height, 2height)),
-              xlabel="Phase [rad]", title=label)
+    ax = Axis(fig[1, panel]; limits=((-π, 2π), (-2height, 2height)), title=label,
+              xlabel="Phase φ [rad]", ylabel = panel == 1 ? "δ = ΔE/(β²E₀)" : "")
     for i in 1:npar
-        lines!(ax, Hu[1][:, i], Hu[2][:, i] ./ β²; color=(:darkorange, 0.55))
-        lines!(ax, Hs[1][:, i], Hs[2][:, i] ./ β²; color=(:steelblue, 0.55))
+        lines!(ax, Hu[1][:, i], Hu[3][:, i]; color=(:darkorange, 0.55))
+        lines!(ax, Hs[1][:, i], Hs[3][:, i]; color=(:steelblue, 0.55))
     end
 end
+Legend(fig[2, :], [LineElement(color=:steelblue), LineElement(color=:darkorange)],
+       ["start at φs", "start at π − φs"]; orientation=:horizontal, framevisible=false)
 fig
 ```
 
 :::{note}
-`δ = ΔE/(β²E₀)` converts between the two vertical axes above; near
-transition the difference matters, which is why $(\phi,\Delta E)$ is preferred
+The map runs in $\Delta E$; the figure plots $\delta=\Delta E/(\beta^2E_0)$.
+While $E_0$ is constant the two differ only by a scale factor, but once the
+reference energy ramps they do not, which is why $(\phi,\Delta E)$ is preferred
 during acceleration.
 :::
 
@@ -142,27 +152,42 @@ constant. At high acceleration rates even that fails — relevant e.g. to medica
 therapy synchrotrons:
 
 ```{code-cell} julia
-# fast acceleration: (φ, ΔE) orbits spiral outward (medical-synchrotron-like)
+# fast acceleration in a low-energy proton ring (medical-synchrotron-like)
 mass, αc, V, h = 0.938e9, 0.05, 0.1e6, 1
-E0_tot = 45e6 + mass                      # low-energy proton
+E0_tot = 45e6 + mass                      # 45 MeV kinetic
 γ = E0_tot/mass; β² = 1-1/γ^2; η = αc-1/γ^2
-sin_φs = 0.5; φs = asin(sin_φs)
+sin_φs = 0.5; φs = asin(sin_φs)           # η < 0 here, so φs is the stable phase
 yf = √(cos(φs) - (π-2φs)*sin(φs)/2)
-height = 2*√(V/(2π*β²*E0_tot*h*abs(η)))*yf
+Ĥ  = 2*√(V/(2π*β²*E0_tot*h*abs(η)))*yf * β²*E0_tot   # bucket half-height in ΔE [eV]
 
-npar = 4
-Φ0 = fill(π-φs, npar)
-E0 = range(0, 0.3e6; length=npar) .|> Float64
-H = longitudinal_map(400, Φ0, E0; sin_φs=sin_φs, αc=αc, E0_tot=E0_tot, mass=mass, V=V, h=h)
+turns = 600                               # the reference gains eV sin φs = 50 keV per turn
+ΔE₀   = [0.3, 0.6, 0.9] .* Ĥ              # three particles inside the bucket
+pars  = (; sin_φs, αc, E0_tot, mass, V, h)
+Hflat = longitudinal_map(turns, fill(φs, 3), ΔE₀; pars..., ramp=false)
+Hramp = longitudinal_map(turns, fill(φs, 3), ΔE₀; pars..., ramp=true)
 
-fig = Figure()
-ax = Axis(fig[1, 1]; xlabel="Phase [rad]", ylabel="ΔE [MeV]",
-          title="Low-energy ring: distorted (non-closed) buckets")
-for i in axes(H[1], 2)
-    lines!(ax, H[1][:, i], H[2][:, i] ./ 1e6)
+fig = Figure(size=(900, 420))
+a1 = Axis(fig[1, 1]; xlabel="Phase φ [rad]", ylabel="δ = ΔE/(β²E₀)",
+          title="(φ, δ): orbits spiral inward")
+a2 = Axis(fig[1, 2]; xlabel="Phase φ [rad]", ylabel="ΔE [MeV]",
+          title="(φ, ΔE): orbits do not close")
+for (i, c) in enumerate((:steelblue, :darkorange, :seagreen))
+    lines!(a1, Hflat[1][:, i], Hflat[3][:, i]; color=(:gray, 0.7), linestyle=:dash)
+    lines!(a1, Hramp[1][:, i], Hramp[3][:, i]; color=c)
+    lines!(a2, Hflat[1][:, i], Hflat[2][:, i] ./ 1e6; color=(:gray, 0.7), linestyle=:dash)
+    lines!(a2, Hramp[1][:, i], Hramp[2][:, i] ./ 1e6; color=c)
 end
+Legend(fig[2, :], [LineElement(color=:gray, linestyle=:dash), LineElement(color=:steelblue)],
+       ["no ramp (closed orbits)", "reference ramped by 50 keV per turn"];
+       orientation=:horizontal, framevisible=false)
 fig
 ```
+
+Over these 600 turns the reference climbs from 45 to 75 MeV, $\beta^2E_0$ grows
+by about 60 % and $2\pi h\eta/(\beta^2E_0)$ falls by about 40 % — too fast for
+the orbits to follow. In $(\phi,\delta)$ every orbit spirals inward; in
+$(\phi,\Delta E)$ they narrow in phase while growing in energy, so neither
+picture closes on itself.
 
 ## From map to differential equations
 
@@ -207,8 +232,9 @@ Q_s=\sqrt{\frac{-eVh\eta\cos\phi_s}{2\pi\beta^2E_0}}
 \equiv\nu_s\sqrt{\left|\cos\phi_s\right|}.
 $$
 
-Let us verify $Q_s$ against the simulated map via spectral analysis — and see
-how it changes away from the small-amplitude limit the formula assumes:
+Let us verify $Q_s$ against the simulated map by timing the oscillation of the
+tracked phase — and see how it changes away from the small-amplitude limit the
+formula assumes:
 
 ```{code-cell} julia
 :tags: [hide-input]
@@ -225,21 +251,35 @@ sin_φs = 0.5
 Qs_small = νs * √abs(cos(φs_stable))
 turns = 4096
 
+"""
+    oscillation_tune(signal)
+
+Oscillations per turn of `signal`, from the turn numbers of its upward zero
+crossings, each interpolated between the two turns that straddle it. Timing
+whole periods, rather than counting crossings, resolves Qs to well under 1 %.
+"""
+function oscillation_tune(signal)
+    t = Float64[]
+    for n in 1:length(signal)-1
+        a, b = signal[n], signal[n+1]
+        a < 0 <= b && push!(t, n + a/(a - b))
+    end
+    length(t) < 2 ? NaN : (length(t) - 1)/(t[end] - t[1])
+end
+
 explorer(
     title   = "Synchrotron tune softens with amplitude",
-    sliders = [Knob("amplitude Δφ₀ [rad]", range(0.05, 1.0, length=20);
+    sliders = [Knob("amplitude Δφ₀ [rad]", [collect(0.05:0.05:1.15); 1.19];
                     fmt = a -> string(round(a; digits=2)), init = 1)],
     panels  = [Panel(xlabel="phase φ [rad]", ylabel="ΔE [MeV]", title="tracked orbit",
                      height=280, legend=:bottomleft)],
-    note = "Qs measured from zero-crossings of the tracked orbit versus the small-amplitude "*
+    note = "Qs timed from the zero crossings of the tracked phase versus the small-amplitude "*
            "formula Qs = νs√|cos φs|: real buckets run slower far from the centre, and Qs → 0 "*
-           "at the separatrix.",
+           "at the separatrix (just beyond Δφ₀ ≈ 1.19 rad here).",
 ) do amp
     H = longitudinal_map(turns, [φs_stable+amp], [0.0];
                          sin_φs=sin_φs, αc=αc, E0_tot=E0_tot, mass=mass, V=V, h=h)
-    signal = H[1][:,1] .- φs_stable
-    ncross = sum(sign.(signal[1:end-1]) .* sign.(signal[2:end]) .< 0)
-    Qs_meas = ncross/(2*length(signal))
+    Qs_meas = oscillation_tune(H[1][:,1] .- φs_stable)
     nshow = 2400
     (series = [line(H[1][1:nshow,1], H[2][1:nshow,1]./1e6; color=PALETTE[1], label="(φ, ΔE)"),
                points([φs_stable], [0.0]; color=PALETTE[3], size=5.0, label="stable fixed point")],
@@ -307,11 +347,12 @@ explorer(
                       fmt = p -> string(Int(round(p))), init = 4),
                Knob("energy and phase choice", 1:4; fmt = i -> REGIME[i][1], init = 1)],
     panels  = [Panel(xlabel="RF phase φ [rad]", ylabel="ΔE [MeV]",
-                     title="longitudinal phase space", xlim=(-π, 2π), ylim=(-400.0, 400.0),
+                     title="longitudinal phase space", xlim=(-π, 2π), autoscale=:frame,
                      height=300, legend=:bottomleft)],
     note = "Orbits come from TrackPad's AccelCavity + LongitudinalRFMap — exactly the "*
            "turn-by-turn map written above. The dashed curve is the analytic separatrix "*
-           "through the unstable fixed point.",
+           "through the unstable fixed point. The ΔE axis follows the bucket height, "*
+           "which grows with |η|/(β²E₀) and shrinks as |φs| moves away from 0 or π.",
 ) do φ0deg, ireg
     lbl, Etot, flip = REGIME[ireg]
     K0 = Etot - mass_p
@@ -324,39 +365,50 @@ explorer(
     ring = Lattice(AbstractElement[cav, LongitudinalRFMap(αc, cav)]; periodic=true)
 
     stable = η*cos(φs) < 0
-    φ_u  = stable ? π - φs : φs                     # the other fixed point
+    φ_u  = stable ? π - φs : φs                     # the unstable fixed point
+    φ_c  = π - φ_u                                  # the stable one, centre of the bucket
     νs   = sqrt(Vrf*hrf*abs(η)/(2π*β^2*Etot))
     Qs   = νs*sqrt(abs(cos(φs)))
 
+    # separatrix through φ_u: ΔE(φ) = ±β²E₀·√sep(φ); its value at φ_c is the bucket height
     pref = -Vrf/(π*hrf*η*β^2*Etot)
+    sep(φ) = pref*(cos(φ) - cos(φ_u) + (φ - φ_u)*sin(φs))
+    Ĥ    = sqrt(sep(φ_c))*β^2*Etot                  # bucket half-height [eV]
+    ymax = 1.6*Ĥ/1e6                                # plotted ΔE range [MeV]
+    clip(v) = abs(v) <= ymax ? v : nothing
+
     φg = collect(range(-π, 2π, length=181))
-    up = Union{Float64,Nothing}[]; dn = Union{Float64,Nothing}[]
-    for φ in φg
-        v = pref*(cos(φ) - cos(φ_u) + (φ - φ_u)*sin(φs))
-        if v >= 0
-            d = sqrt(v)*β^2*Etot/1e6
-            push!(up, d); push!(dn, -d)
-        else
-            push!(up, nothing); push!(dn, nothing)
+    tips = Float64[]                                # where the separatrix closes: sep = 0
+    for i in 1:length(φg)-1
+        a, b = φg[i], φg[i+1]
+        sep(a)*sep(b) < 0 || continue
+        for _ in 1:60
+            m = (a + b)/2
+            sep(a)*sep(m) <= 0 ? (b = m) : (a = m)
         end
+        push!(tips, (a + b)/2)
     end
+    pts = sort!(vcat([(φ, sep(φ)) for φ in φg], [(φ, 0.0) for φ in tips]))
+    φsep = first.(pts)
+    up = [v >= 0 ? clip( sqrt(v)*β^2*Etot/1e6) : nothing for (_, v) in pts]
+    dn = [v >= 0 ? clip(-sqrt(v)*β^2*Etot/1e6) : nothing for (_, v) in pts]
 
     np = 3
     stride = max(1, round(Int, 1.8/max(Qs, 1e-5)/NSAMP))
     c = zeros(np, 6)
-    c[:, 6] .= collect(range(60.0e6, 240.0e6, length=np)) ./ P0c
+    c[:, 6] .= [0.25, 0.55, 0.85] .* Ĥ ./ P0c       # start at φs, scaled to the bucket
     flags = zeros(Int, np)
-    Φh = [Float64[] for _ in 1:np]; Eh = [Float64[] for _ in 1:np]
+    Φh = [Float64[] for _ in 1:np]; Eh = [Union{Float64,Nothing}[] for _ in 1:np]
     for _ in 1:NSAMP
         ringpass!(c, ring, bm, flags, stride)
         for j in 1:np
-            push!(Φh[j], φs - krf*c[j,5]); push!(Eh[j], c[j,6]*P0c/1e6)
+            push!(Φh[j], φs - krf*c[j,5]); push!(Eh[j], clip(c[j,6]*P0c/1e6))
         end
     end
 
     (series = vcat(
-        [line(φg, up; color=PALETTE[4], dash=true, width=1.6, label="separatrix"),
-         line(φg, dn; color=PALETTE[4], dash=true, width=1.6)],
+        [line(φsep, up; color=PALETTE[4], dash=true, width=1.6, label="separatrix"),
+         line(φsep, dn; color=PALETTE[4], dash=true, width=1.6)],
         [line(Φh[j], Eh[j]; color=PALETTE[1], alpha=0.85, width=1.2,
               label = j == 1 ? "tracked orbits" : nothing) for j in 1:np],
         [points([φs, φ_u], [0.0, 0.0]; color=PALETTE[3], size=5.5, label="fixed points")]),
@@ -366,6 +418,7 @@ explorer(
                  "η cos φs" => round(η*cos(φs); sigdigits=3),
                  "verdict" => stable ? "φs is phase-stable" : "φs is unstable",
                  "Qs" => stable ? string(round(Qs; sigdigits=4)) : "—",
+                 "bucket half-height" => string(round(Ĥ/1e6; sigdigits=3), " MeV"),
                  "turns shown" => string(NSAMP*stride)])
 end
 ```

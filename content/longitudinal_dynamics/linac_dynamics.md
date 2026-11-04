@@ -105,8 +105,11 @@ $$
 Because $\eta=-1/\gamma_s^2<0$, stability requires $\cos\phi_{s}>0$: a
 particle arriving late gains more voltage, climbs toward higher velocity, and
 therefore arrives earlier at the next gap — a restoring motion around the
-synchronous phase. As $\gamma_s$ grows along the linac, the slip weakens like
-$\gamma_s^{-3}$ and the oscillation adiabatically damps.
+synchronous phase. As the beam gains energy the slip weakens like
+$(\beta_s\gamma_s)^{-3}$: the *phase* oscillation adiabatically damps while the
+*energy* oscillation grows, keeping the area in $(\Delta\phi,\Delta E)$ fixed —
+which is why the tracked orbit above narrows in $\Delta\phi$ and stretches in
+$\Delta E$ from gap to gap.
 
 ## Scanning the synchronous phase
 

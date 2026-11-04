@@ -117,8 +117,11 @@ explorer(
                      title="one full RF wavelength", height=250, legend=:bottomleft),
                Panel(xlabel="z [cm]", ylabel="δ_E − δ_E(0)  ×10⁻³",
                      title="zoom on a bunch (±15 cm)", height=250, legend=:bottomleft)],
-    note = "z > 0 means the particle arrives early. A negative slope at z = 0 restores an "*
-           "early particle towards the synchronous one — that is longitudinal focusing.",
+    note = "z > 0 means the particle arrives early. Below transition (η < 0, e.g. a linac) "*
+           "a lower-energy particle falls behind, so a negative slope at z = 0 pulls an early "*
+           "particle back towards the synchronous one — longitudinal focusing. Above "*
+           "transition (η > 0) it is the higher-energy particle that falls behind, so "*
+           "focusing needs a positive slope instead.",
 ) do φlag, VMV
     V = VMV * 1e6
     cav = Lattice(AbstractElement[RFCavity(0.0, V, f_rf; philag=φlag,
@@ -126,20 +129,32 @@ explorer(
     dfull = kick_curve(cav, zs)
     dnear = kick_curve(cav, zn)
     d0 = linepass(cav, SVector{6}(zeros(6)...), beam10)[6]
-    slope = (dnear[end] - dnear[1]) / (zn[end] - zn[1])
+    dz = 1.0e-3                                      # central difference at z = 0
+    δplus, δminus = kick_curve(cav, [dz, -dz])
+    slope = (δplus - δminus) / (2dz)
+    P0c = beam10.beta*(beam10.energy + beam10.mass)
+    # on the crest or trough the slope is zero up to round-off: call it neutral
+    abs(slope) < 1e-6 * (2π/λ_rf) * V/P0c && (slope = 0.0)
+    # η < 0 needs a negative slope to focus, η > 0 a positive one
+    verdict(sgn_η) = slope == 0 ? "neutral" : (sgn_η*slope > 0 ? "focusing" : "defocusing")
+    ΔE_ref = d0*P0c                                  # [eV], likewise zero at the zero crossing
+    abs(ΔE_ref) < 1e-9*V && (ΔE_ref = 0.0)
     φ0 = -φlag
     (series = [line(zs, dfull .* 1e3; panel=1, color=PALETTE[1], label="δ_E(z)"),
                points([0.0], [d0*1e3]; panel=1, color=PALETTE[4], size=5.0, label="reference"),
                line(zn .* 100, (dnear .- d0) .* 1e3; panel=2, color=PALETTE[1],
                     label="δ_E − δ_E(0)")],
      readouts = ["φ at z = 0" => string(Int(round(rad2deg(mod(φ0, 2π)))), "°"),
-                 "ΔE of the reference" => string(round(d0*beam10.beta*(beam10.energy+beam10.mass)/1e3;
-                                                       sigdigits=4), " keV"),
+                 "ΔE of the reference" => string(round(ΔE_ref/1e3; sigdigits=4), " keV"),
                  "dδ_E/dz" => string(round(slope; sigdigits=3), " m⁻¹"),
-                 "longitudinally" => slope < 0 ? "focusing" : (slope > 0 ? "defocusing" : "neutral")])
+                 "below transition (η < 0)" => verdict(-1),
+                 "above transition (η > 0)" => verdict(+1)])
 end
 ```
 
 This is the same physics that the next chapter turns into a turn-by-turn map: a
-particle sitting where the slope is negative gets nudged back every time it
-passes the cavity, and repeated small nudges are what build the RF bucket.
+particle sitting on the focusing slope — negative below transition, positive
+above — gets nudged back every time it passes the cavity, and repeated small
+nudges are what build the RF bucket. The stability condition
+$\eta\cos\phi_s<0$ derived there is this sign rule written in terms of the
+synchronous phase.
