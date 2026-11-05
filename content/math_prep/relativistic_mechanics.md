@@ -109,10 +109,10 @@ This dot product is invariant under Lorentz transformations.
 ## Numerical examples in Julia
 
 Relativistic kinematics appears everywhere in accelerator physics — for
-instance inside TrackPad's `Beam`, which stores kinetic energy $K_0$, rest mass
-$m_0c^2$, and derives $\beta_0$ and $\gamma_0$. However you compute them, $\beta$
+instance, a tracking simulation describes the reference particle by its kinetic
+energy $K_0$ and rest mass $m_0c^2$, and derives $\beta_0$ and $\gamma_0$ from them. However you compute them, $\beta$
 and $\gamma$ are locked to the same curve $\gamma=1/\sqrt{1-\beta^2}$; slide the
-kinetic energy and watch TrackPad's own $(\beta_0,\gamma_0)$ ride along it:
+kinetic energy and watch the simulation's $(\beta_0,\gamma_0)$ ride along it:
 
 ```{code-cell} julia
 :tags: [hide-input]
@@ -136,13 +136,13 @@ function energy_label(K)
 end
 
 explorer(
-    title   = "TrackPad's Beam(K): γ and β are locked to the same curve",
+    title   = "γ and β are locked to the same curve",
     sliders = [Knob("kinetic energy K", eachindex(kinetic_energies);
                     fmt = i -> energy_label(kinetic_energies[i]), init = 20)],
     panels  = [Panel(xlabel="β", ylabel="γ", title="γ = 1/√(1−β²)",
                      xlim=(0.0,1.02), ylim=(0.0,20.0), height=300, legend=:bottomleft)],
     statics = [line(β_curve, γ_curve; color="#9aa4b2", label="analytic γ(β)")],
-    note = "The marker is TrackPad's own (β₀, γ₀) for Beam(K); it lands on the analytic curve "*
+    note = "The marker is the (β₀, γ₀) the simulation derives from K; it lands on the analytic curve "*
            "by construction — γ = 1+K/mc² and β = √(1−1/γ²) always agree.",
 ) do i
     K    = kinetic_energies[i]

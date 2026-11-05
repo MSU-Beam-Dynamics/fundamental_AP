@@ -167,8 +167,8 @@ explorer(
                      xscale=:log10, yscale=:log10, xlim=(8.0e3, 1.3e13),
                      height=300, legend=:bottomright)],
     statics = rigidity_curves,
-    note = "Bρ = P/q is the natural normalisation of transverse motion: TrackPad's k₁ is "*
-           "G/(Bρ). At low energy the two species differ by their rest masses; once both "*
+    note = "Bρ = P/q is the natural normalisation of transverse motion: a quadrupole's "*
+           "strength is k₁ = G/(Bρ). At low energy the two species differ by their rest masses; once both "*
            "are ultra-relativistic the curves merge, because Bρ then depends only on energy.",
 ) do i, j
     species = SPECIES[j]
@@ -366,10 +366,10 @@ multipole_panel!(Axis(fig[1, 2]; aspect=DataAspect()), "Skew sextupole",
 fig
 ```
 
-In TrackPad these elements appear as `Drift(L)`, `Quadrupole(L, k1)`,
-`Sextupole(L, k2)`, `Octupole(L, k3)`, `SBend(L, angle, e1, e2)` and friends,
-with strengths normalized by rigidity ($k_1=G/(B\rho)$ in
-$\mathrm{m}^{-2}$, $k_2$ not pre-divided by factorials).
+In the simulations each magnet is described by its length and its strength
+normalized by the rigidity: $k_1=G/(B\rho)$ in $\mathrm{m}^{-2}$ for a
+quadrupole, and likewise $k_2$ and $k_3$ for sextupoles and octupoles, not
+pre-divided by factorials.
 
 ## What each multipole order does to a beam
 

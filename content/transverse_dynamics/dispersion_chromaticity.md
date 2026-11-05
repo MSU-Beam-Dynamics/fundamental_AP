@@ -300,7 +300,7 @@ explorer(
                      height=175, basis="31%", minwidth=150, ticklabels=false)],
     statics = BEAMLINE_CH,
     note = "The bunch is a Gaussian matched to β = 20 m at the entrance, so it arrives "*
-           "0.8 mm wide and almost parallel. TrackPad gives every particle the same pₓ "*
+           "0.8 mm wide and almost parallel. The quadrupole gives every particle the same pₓ "*
            "kick — it is the drift that divides by (1+δ), so stiffer particles turn "*
            "through a smaller angle and focus further downstream. Set σ_δ to zero and "*
            "the fan collapses to one focal point; open it and the point becomes a "*
@@ -386,7 +386,7 @@ explorer(
     note = "ξ = −(1/4π)∮β(s)k(s)ds: stronger quadrupoles focus more but also chromatically "*
            "detune more, and the cell runs out of stability just above k₁ = 1.197 m⁻². Real rings "*
            "correct this to small positive values with sextupole families — the next "*
-           "figure. The readouts check TrackPad's getchrom against the slope of the "*
+           "figure. The readouts check the computed chromaticity against the slope of the "*
            "curve actually plotted.",
 ) do k
     lat = Lattice(fodo_k(k); periodic=true)

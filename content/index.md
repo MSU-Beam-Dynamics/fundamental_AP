@@ -4,7 +4,7 @@ These lecture notes introduce the fundamental physics of particle accelerators, 
 [Jupyter Book 2](https://jupyterbook.org) site.  The simulations are powered by the
 [TrackPad.jl](https://github.com/MSU-Beam-Dynamics/TrackPad.jl), an accelerator tracking package that supports auto-differentiation, power series analysis and GPU accelerations.
 
-The notes are organized in three parts:
+The notes are organized in four parts:
 
 1. **Math Preparation** — linear algebra, relativistic mechanics, differential
    equations, and vector calculus, with numerical examples in Julia.
@@ -14,6 +14,9 @@ The notes are organized in three parts:
    TrackPad.jl.
 3. **Longitudinal Dynamics in a Ring** — RF acceleration, the longitudinal turn-by-turn
    map, phase stability, synchrotron motion and bucket dynamics.
+4. **Synchrotron** — the synchrotron principle and accelerator chains, single- and
+   multi-turn injection, filamentation, and fast, slow and low-loss resonant
+   extraction, simulated with TrackPad.jl.
 
 ## Interactive figures
 

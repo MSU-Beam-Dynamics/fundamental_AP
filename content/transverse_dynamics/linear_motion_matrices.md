@@ -252,7 +252,7 @@ end
 ```
 
 ### Tracking through a drift
-Now reproduce the same physics with TrackPad's tracking engine: launch an ensemble of particles through a drift, watch the phase-space distribution shear:
+Now reproduce the same physics by tracking: launch an ensemble of particles through a drift and watch the phase-space distribution shear:
 
 ```{code-cell} julia
 :tags: [hide-input]

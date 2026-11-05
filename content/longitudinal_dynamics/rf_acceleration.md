@@ -54,7 +54,17 @@ T=\frac{\int_{-\infty}^{\infty} E_0(s) \cos\frac{\omega s}{\beta c}\, ds}
 $$
 
 defining the equivalent cavity **voltage** $V$ and the **transit-time factor**
-$T$. For the reference particle,
+$T$. Here $\phi$ is the RF phase the particle sees at the centre of the cavity,
+which depends on its longitudinal position $z$:
+
+$$
+\phi=\phi_s-\frac{\omega z}{\beta c}=\phi_s-\frac{2\pi z}{\beta\lambda_{\mathrm{RF}}},
+$$
+
+with $\lambda_{\mathrm{RF}}=2\pi c/\omega$ the RF wavelength. A particle with
+$z>0$ is ahead of the reference, so it arrives early and sees an earlier phase,
+$\phi<\phi_s$. In a ring, where $\omega=h\omega_0=h\beta c/R$, this reads
+$\phi=\phi_s-hz/R$. The reference particle has $z=0$, so
 
 $$
 \Delta U_0 = eV\sin \phi_s .
@@ -66,31 +76,14 @@ $$
 \Delta E|_{1}=\Delta E|_{0}+ eV \left(\sin \phi-\sin \phi_s\right).
 $$
 
-## The RF kick in TrackPad
 
-TrackPad implements exactly this thin-lens physics in `RFCavity`. Its phase
-convention is
-
-$$
-\phi=-2\pi f\,\frac{z+\ell_{\mathrm{lag}}}{c}-\phi_{\mathrm{lag}},
-\qquad
-\delta_E^{+}=\delta_E^{-}-\frac{\widehat q V}{P_0c}\,\sin\phi,
-$$
-
-with $\widehat q=q/e$ the *signed* charge.
-
-:::{caution}
-A directly constructed `RFCavity` defaults to `energy=0`, which **disables**
-its kick. When building cavities by hand, always pass
-`energy=beam.energy` and `charge=beam.charge` (file readers such as PALS/MAD-X
-set both automatically).
-:::
 
 ## The kick as a function of arrival phase
 
-Let TrackPad trace out the whole curve: $\delta_E$ after the cavity as a
+Let simulation trace out the whole curve: $\delta_E$ after the cavity as a
 function of where in the RF wavelength the particle arrives.
-$\phi_{\mathrm{lag}}$ slides that curve left and right — it sets which $z$ sees
+The slider $\phi_{\mathrm{lag}}$ is the cavity's phase setting,
+$\phi_s=-\phi_{\mathrm{lag}}$. It slides that curve left and right — it sets which $z$ sees
 zero crossing, i.e. which particle is synchronous:
 
 ```{code-cell} julia

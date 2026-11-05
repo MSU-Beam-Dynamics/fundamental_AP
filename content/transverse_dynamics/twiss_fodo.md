@@ -349,10 +349,10 @@ cosine of exactly that phase advance. At $L_1/f = 2$ the pair collides at
 $\lambda=-1$ and then splits along the real axis: one eigenvalue larger than
 one in modulus, and the orbit grows exponentially. The matched ellipse at the focusing quad center is always upright, due to the symmetry of the lattice.
 
-## Simulating a FODO ring with TrackPad
+## Simulating a FODO ring
 
-Build a realistic thick-lens FODO ring and let TrackPad compute the periodic
-solution of optics function:
+Build a realistic thick-lens FODO ring and compute the periodic solution of the
+optics functions:
 
 ```{code-cell} julia
 :tags: [hide-input]
@@ -395,7 +395,7 @@ println("optics sampled at ", length(twiss.s), " points over ",
 
 # The thin-lens prediction sin(Φ/2) = L₁/(2f), with L₁ the half-cell length.
 phase_advance_thin_lens = 2asin((CELL_LENGTH/2)/(2*FOCAL_LENGTH))
-println("phase advance/cell: TrackPad = ", round(twiss.tunex*2π; digits=4),
+println("phase advance/cell: thick-lens ring = ", round(twiss.tunex*2π; digits=4),
         " rad ; thin-lens model = ", round(phase_advance_thin_lens; digits=4), " rad")
 
 # Translucent glyphs, so the beamline reads as a background band and never hides

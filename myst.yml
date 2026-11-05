@@ -28,6 +28,11 @@ project:
         - file: content/longitudinal_dynamics/rf_acceleration.md
         - file: content/longitudinal_dynamics/ring_longitudinal_map.md
         - file: content/longitudinal_dynamics/linac_dynamics.md
+    - title: Synchrotron
+      children:
+        - file: content/synchrotron/synchrotron_principle.md
+        - file: content/synchrotron/injection.md
+        - file: content/synchrotron/extraction.md
 site:
   template: book-theme
   options:

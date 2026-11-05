@@ -267,22 +267,50 @@ function oscillation_tune(signal)
     length(t) < 2 ? NaN : (length(t) - 1)/(t[end] - t[1])
 end
 
+# The separatrix through the unstable fixed point π − φs turns back at the phase
+# beyond φs where cos φ + φ sin φs takes the same value as at π − φs.
+φu = π - φs_stable
+on_separatrix(φ) = cos(φ) + φ*sin_φs - cos(φu) - φu*sin_φs
+Δφ_sep = let a = φs_stable, b = φs_stable + 2.0          # bisect for that root
+    for _ in 1:80
+        m = (a + b)/2
+        on_separatrix(a)*on_separatrix(m) <= 0 ? (b = m) : (a = m)
+    end
+    (a + b)/2 - φs_stable
+end
+
+# Qs over a fine grid of amplitudes, packed close to the separatrix where it falls steeply
+amps_curve = [collect(0.02:0.02:1.18); Δφ_sep .- 10.0 .^ -(2:0.5:5)]
+Hc = longitudinal_map(20000, φs_stable .+ amps_curve, zeros(length(amps_curve));
+                      sin_φs=sin_φs, αc=αc, E0_tot=E0_tot, mass=mass, V=V, h=h)
+Qs_curve = [oscillation_tune(Hc[1][:, j] .- φs_stable) for j in eachindex(amps_curve)]
+
 explorer(
     title   = "Synchrotron tune softens with amplitude",
     sliders = [Knob("amplitude Δφ₀ [rad]", [collect(0.05:0.05:1.15); 1.19];
                     fmt = a -> string(round(a; digits=2)), init = 1)],
     panels  = [Panel(xlabel="phase φ [rad]", ylabel="ΔE [MeV]", title="tracked orbit",
-                     height=280, legend=:bottomleft)],
-    note = "Qs timed from the zero crossings of the tracked phase versus the small-amplitude "*
-           "formula Qs = νs√|cos φs|: real buckets run slower far from the centre, and Qs → 0 "*
-           "at the separatrix (just beyond Δφ₀ ≈ 1.19 rad here).",
+                     height=280, legend=:bottomleft),
+               Panel(xlabel="amplitude Δφ₀ [rad]", ylabel="Qs × 10³", title="tune versus amplitude",
+                     xlim=(0.0, 1.3), ylim=(0.0, 1.5), height=280, legend=:bottomleft)],
+    statics = [line(amps_curve, 1e3 .* Qs_curve; panel=2, color=PALETTE[1], label="tracked"),
+               line([0.0, 1.3], fill(1e3*Qs_small, 2); panel=2, color=PALETTE[2], dash=true,
+                    label="small-amplitude formula"),
+               line([Δφ_sep, Δφ_sep], [0.0, 1.5]; panel=2, color=PALETTE[4], dash=true,
+                    label="separatrix")],
+    note = "Qs is timed from the zero crossings of the tracked phase and compared with the "*
+           "small-amplitude formula Qs = νs√|cos φs|. Real buckets run slower far from the "*
+           "centre, and Qs reaches 0 at the separatrix (Δφ₀ = $(round(Δφ_sep; digits=3)) rad "*
+           "here) — but only logarithmically: an orbit 10⁻⁵ rad inside it still has about a "*
+           "third of the small-amplitude tune.",
 ) do amp
     H = longitudinal_map(turns, [φs_stable+amp], [0.0];
                          sin_φs=sin_φs, αc=αc, E0_tot=E0_tot, mass=mass, V=V, h=h)
     Qs_meas = oscillation_tune(H[1][:,1] .- φs_stable)
     nshow = 2400
-    (series = [line(H[1][1:nshow,1], H[2][1:nshow,1]./1e6; color=PALETTE[1], label="(φ, ΔE)"),
-               points([φs_stable], [0.0]; color=PALETTE[3], size=5.0, label="stable fixed point")],
+    (series = [line(H[1][1:nshow,1], H[2][1:nshow,1]./1e6; panel=1, color=PALETTE[1], label="(φ, ΔE)"),
+               points([φs_stable], [0.0]; panel=1, color=PALETTE[3], size=5.0, label="stable fixed point"),
+               points([amp], [1e3*Qs_meas]; panel=2, color=PALETTE[1], size=6.0, label="this orbit")],
      readouts = ["Δφ₀" => round(amp; digits=3),
                  "Qs measured" => round(Qs_meas; sigdigits=4),
                  "Qs small-amplitude" => round(Qs_small; sigdigits=4),
@@ -320,11 +348,184 @@ $$
 Its usual unit is eV·s. Mismatched injection and filamentation quickly wash
 out correlations, leaving the rms estimate.
 
+The figure below tracks Gaussian bunches through the turn-by-turn map of this
+chapter, in the RHIC-like ring with $\phi_s=150^\circ$ of the tune figure above.
+Its time coordinate is $\Delta t=(\phi-\phi_s)/\omega_{\mathrm{RF}}$, positive
+for a particle that arrives late. Four bunches are tracked at 250 GeV:
+
+- **matched**: the ratio $\sigma_{\Delta E}/\sigma_{\Delta t}$ fits the
+  small-amplitude bucket, so the bunch rotates in place and keeps its area;
+- **half the matched length**, with twice the energy spread and the same area:
+  the bunch tumbles at twice the synchrotron frequency. While it is tilted, the
+  correlation term matters and $\pi\sigma_{\Delta t}\sigma_{\Delta E}$
+  overestimates the area; as the bunch filaments, its true rms area grows;
+- **half the matched length with a tenth of the area**: the same mismatch in a
+  smaller bunch, which stays near the bucket centre where the motion is nearly
+  linear. All its particles share almost the same synchrotron tune, so it keeps
+  tumbling as one body: $\pi\sigma_{\Delta t}\sigma_{\Delta E}$ swings back and
+  forth while the rms area holds still. The tune spread grows with the square of
+  the amplitude, so this bunch filaments too, but several times later;
+- **injected 0.3 rad late**, with the matched area: the whole bunch oscillates
+  about the bucket centre and smears out around it.
+
+What happens to the area during acceleration, including across transition, is
+the subject of the last section.
+
+```{code-cell} julia
+:tags: [hide-input]
+
+using Random
+
+# The RHIC-like ring of the tune figure at 250 GeV: φs = 150°, above transition
+mass, αc, V, h = 0.938e9, 0.0018, 5e6, 360
+sin_φs = 0.5; φs = π - asin(sin_φs)
+ω_rf = 2π*28.15e6                       # Δt = (φ − φs)/ω_rf, positive = arrives late
+const E_LE = 250e9                      # total energy of the bunches [eV]
+slip(E)  = αc - (mass/E)^2              # η at total energy E
+beta2(E) = 1 - (mass/E)^2
+
+"σ_ΔE/σ_φ of a bunch matched to the small-amplitude bucket at total energy E [eV/rad]."
+function matched_ratio(E)
+    Qs = sqrt(V*h*abs(slip(E))/(2π*beta2(E)*E))*sqrt(abs(cos(φs)))
+    Qs*beta2(E)*E/(h*abs(slip(E)))
+end
+
+"""
+    bunch_moments(Δt, ΔE)
+
+Centroid, second moments, the rms area π√(σt²σE² − ⟨ΔtΔE⟩²), its uncorrelated
+estimate π σt σE, and r95: the ellipse shaped like the rms one that holds 95 %
+of the particles has area r95 × A_rms.
+"""
+function bunch_moments(Δt, ΔE)
+    N  = length(Δt)
+    mt, mE = sum(Δt)/N, sum(ΔE)/N
+    dt, dE = Δt .- mt, ΔE .- mE
+    vt, vE, c = sum(abs2, dt)/N, sum(abs2, dE)/N, sum(dt .* dE)/N
+    d  = vt*vE - c^2
+    r2 = sort((dE.^2 .* vt .- 2c .* dt .* dE .+ dt.^2 .* vE) ./ d)
+    (; mt, mE, vt, vE, c, rms = π*sqrt(d), uncorr = π*sqrt(vt*vE), r95 = r2[ceil(Int, 0.95N)])
+end
+
+"Ellipse of the bunch's rms shape scaled to area k × A_rms."
+function moment_ellipse(m, k; n=90)
+    L11 = sqrt(m.vt); L21 = m.c/L11; L22 = sqrt(m.vE - L21^2)
+    θ = range(0, 2π, length=n)
+    m.mt .+ sqrt(k)*L11 .* cos.(θ), m.mE .+ sqrt(k) .* (L21 .* cos.(θ) .+ L22 .* sin.(θ))
+end
+
+# The bucket runs from the unstable fixed point φu to the far tip φs + Δφ_sep (tune figure).
+φ_lo, φ_hi = π - φs, φs + Δφ_sep
+"Upper half of the separatrix at total energy E, as (Δt [ns], ΔE [MeV])."
+function separatrix(E; n=80)
+    pref = -V/(π*h*slip(E)*beta2(E)*E)
+    φg = collect(range(φ_lo, φ_hi, length=n))
+    ΔEsep = [beta2(E)*E*sqrt(max(pref*(cos(φ) - cos(φ_lo) + (φ - φ_lo)*sin_φs), 0.0))/1e6
+             for φ in φg]
+    round.((φg .- φs) ./ ω_rf .* 1e9; digits=2), round.(ΔEsep; digits=1)
+end
+
+const NLE = 1500
+const NPLOT = 800                       # particles drawn; the statistics use all NLE
+const σφ0 = 0.15                        # rms length of the matched bunch [rad of RF phase]
+LE_SNAP  = [0, 50, 100, 200, 300, 400, 800, 1000, 2000, 3000, 5000, 8000, 12000,
+            20000, 30000, 60000]
+LE_TRACE = [10:10:1000; 1050:50:6000; 6100:100:60000]        # turns where the areas are logged
+
+# (label, length factor r, area factor a, phase error [rad]): the bunch is r times
+# its matched length, and its rms area a times that of the matched bunch
+LE_CASES = [("matched",                       1.0, 1.0, 0.0),
+            ("half the matched length",       0.5, 1.0, 0.0),
+            ("half length, 1/10 of the area", 0.5, 0.1, 0.0),
+            ("injected 0.3 rad late",         1.0, 1.0, 0.3)]
+# fully filamented rms area in linear theory, in units of the starting area
+filamented(r, a, Δφ) = (r^2 + 1/r^2)/2 + (Δφ/(σφ0*sqrt(a)))^2/2
+
+function emittance_run(r, a, Δφ)
+    rng = MersenneTwister(7)
+    σφ = σφ0*sqrt(a)                       # matched length for this area
+    φ  = φs + Δφ .+ (r*σφ) .* randn(rng, NLE)
+    ΔE = (σφ*matched_ratio(E_LE)/r) .* randn(rng, NLE)
+    t = 0
+    alive = trues(NLE)
+    A0 = bunch_moments((φ .- φs) ./ ω_rf, ΔE).rms
+    snaps = Dict{Int,Any}(); trace = (t = Int[], rms = Float64[], uncorr = Float64[])
+    for target in sort(unique([LE_SNAP; LE_TRACE]))
+        if target > t
+            Φh, Eh, _ = longitudinal_map(target - t, φ, ΔE; sin_φs, αc, E0_tot=E_LE, mass, V, h)
+            φ, ΔE = Φh[end, :], Eh[end, :]
+            t = target
+        end
+        alive .&= φ_lo .< φ .< φ_hi             # a particle that leaves the bucket is lost
+        Δt = (φ[alive] .- φs) ./ ω_rf
+        m  = bunch_moments(Δt, ΔE[alive])
+        if t in LE_TRACE
+            push!(trace.t, t); push!(trace.rms, round(m.rms/A0; digits=3))
+            push!(trace.uncorr, round(m.uncorr/A0; digits=3))
+        end
+        shown = 1:min(NPLOT, length(Δt))
+        t in LE_SNAP && (snaps[t] = (Δt = round.(Δt[shown] .* 1e9; digits=2),
+                                     ΔE = round.(Int, ΔE[alive][shown] ./ 1e6),
+                                     m = m, A0 = A0, lost = NLE - count(alive)))
+    end
+    (snaps = snaps, trace = trace)
+end
+le_runs = [emittance_run(c[2:end]...) for c in LE_CASES]
+sep_t, sep_E = separatrix(E_LE)
+
+explorer(
+    title   = "Longitudinal emittance: matched and mismatched bunches",
+    sliders = [Knob("turn", LE_SNAP; fmt = string, init = 1),
+               Knob("bunch", 1:length(LE_CASES); fmt = i -> LE_CASES[i][1], init = 2,
+                    newline = true)],
+    panels  = [Panel(xlabel="Δt [ns]", ylabel="ΔE [MeV]", title="the bunch in (Δt, ΔE)",
+                     xlim=(-12.5, 7.5), ylim=(-750.0, 750.0), height=320, legend=:bottomleft,
+                     basis="48%", minwidth=280),
+               Panel(xlabel="turn", ylabel="area / starting rms area", title="area versus turn",
+                     xscale=:log10, xlim=(10.0, 6.0e4), ylim=(0.0, 4.0), height=320,
+                     legend=:topleft, basis="48%", minwidth=280)],
+    statics = [line(sep_t, sep_E; panel=1, color=PALETTE[4], dash=true, width=1.6, label="separatrix"),
+               line(sep_t, -sep_E; panel=1, color=PALETTE[4], dash=true, width=1.6)],
+    note = "The dashed line is the linear-theory area after full filamentation, "*
+           "(r² + 1/r²)/2 + (Δφ/σφ)²/2 for a bunch r times the matched length injected Δφ "*
+           "off phase; the bucket's nonlinearity makes the real growth a little larger. "*
+           "A₉₅ is the area of the ellipse, shaped like the rms ellipse, that holds 95 % of "*
+           "the particles: about 6 A_rms while the bunch is Gaussian, but not once it has "*
+           "filamented.",
+) do turn, icase
+    label, r, a, Δφ = LE_CASES[icase]
+    run = le_runs[icase]
+    s = run.snaps[turn]
+    ex, ey = moment_ellipse(s.m, s.m.r95)
+    k = searchsortedlast(run.trace.t, turn)
+    series = Any[points(s.Δt, s.ΔE; panel=1, color=PALETTE[1], size=1.6, alpha=0.55, label="protons"),
+                 line(round.(ex .* 1e9; digits=3), round.(ey ./ 1e6; digits=1); panel=1, color=PALETTE[2], width=2.0, label="95 % ellipse"),
+                 line([10.0, 6.0e4], fill(filamented(r, a, Δφ), 2); panel=2, color="#5b6472",
+                      dash=true, label="filamented, linear theory")]
+    if k > 0
+        push!(series, line(run.trace.t[1:k], run.trace.uncorr[1:k]; panel=2, color=PALETTE[2],
+                           width=1.4, label="π σt σE"))
+        push!(series, line(run.trace.t[1:k], run.trace.rms[1:k]; panel=2, color=PALETTE[1],
+                           width=2.0, label="rms area"))
+        push!(series, points([Float64(turn)], [run.trace.rms[k]]; panel=2, color=PALETTE[1], size=5.0))
+    end
+    eVs(A) = string(round(A; sigdigits=3), " eV·s")
+    (series = series,
+     readouts = ["rms area" => eVs(s.m.rms),
+                 "π σt σE" => eVs(s.m.uncorr),
+                 "rms area / start" => round(s.m.rms/s.A0; digits=3),
+                 "A₉₅ / A_rms" => round(s.m.r95; digits=2),
+                 "σt, σE" => string(round(sqrt(s.m.vt)*1e9; digits=2), " ns, ",
+                                    round(sqrt(s.m.vE)/1e6; digits=1), " MeV"),
+                 "lost" => string(s.lost, " of ", NLE)])
+end
+```
+
 ## The bucket, tracked turn by turn
 
 The table above summarized which fixed point is stable in which regime; here
-is that statement produced by actually tracking particles with TrackPad's
-`AccelCavity` and `LongitudinalRFMap` — the same two elements, turn after turn.
+is that statement produced by actually tracking particles through the RF cavity
+and the rest of the ring, turn after turn.
 The dashed curve is the analytic separatrix through the *unstable* fixed point;
 whichever of $\phi_s$ or $\pi-\phi_s$ is **not** on that curve is the stable one:
 
@@ -349,8 +550,8 @@ explorer(
     panels  = [Panel(xlabel="RF phase φ [rad]", ylabel="ΔE [MeV]",
                      title="longitudinal phase space", xlim=(-π, 2π), autoscale=:frame,
                      height=300, legend=:bottomleft)],
-    note = "Orbits come from TrackPad's AccelCavity + LongitudinalRFMap — exactly the "*
-           "turn-by-turn map written above. The dashed curve is the analytic separatrix "*
+    note = "The orbits are tracked turn by turn with exactly the map written above. "*
+           "The dashed curve is the analytic separatrix "*
            "through the unstable fixed point. The ΔE axis follows the bucket height, "*
            "which grows with |η|/(β²E₀) and shrinks as |φs| moves away from 0 or π.",
 ) do φ0deg, ireg
@@ -422,3 +623,174 @@ explorer(
                  "turns shown" => string(NSAMP*stride)])
 end
 ```
+
+## Crossing transition
+
+The RHIC-like ring of this chapter injects protons at 20 GeV, below the
+transition energy $\gamma_t=1/\sqrt{\alpha_c}\approx 23.6$ (22.1 GeV total), and
+accelerates them to 250 GeV, so its ramp crosses transition. (In the real RHIC
+it is the heavy ions that are injected below transition; protons arrive above
+it.[^gtjump]) There $\eta$ changes sign, and by
+the stability condition $\eta\cos\phi_s<0$ the stable phase moves from $\phi_s$
+to $\pi-\phi_s$: with $\sin\phi_s=0.5$, from $30^\circ$ to $150^\circ$. At the
+moment of crossing the RF system has to shift its phase by
+$\pi-2\phi_s=120^\circ$, and it has to do so abruptly. On its way from
+$30^\circ$ to $150^\circ$ the phase passes the crest, so during the switch the
+synchronous particle gains more than the $eV\sin\phi_s$ that the magnet ramp
+asks for, and the whole bunch ends up off energy. (Centring the switch on
+transition at least keeps the bunch on the focusing slope throughout: the phase
+is below $90^\circ$ while $\eta<0$ and above $90^\circ$ once $\eta>0$.)
+
+Transition is hard on the bunch even with a perfect jump. As $\eta\to 0$ the
+synchrotron motion freezes, so the motion stops being adiabatic, and the bunch
+becomes short with a large energy spread.
+
+The figure below ramps a matched bunch from 20 GeV with the map of this chapter,
+2.5 MeV per turn, so transition comes at turn 844. The phase is switched either
+over 10 turns or over 100 turns, centred on the crossing. $\Delta t$ is measured
+from the synchronous phase that the RF program sets on that turn.
+
+```{code-cell} julia
+:tags: [hide-input]
+
+# RHIC-like ramp through transition: the reference gains eV sin φs = 2.5 MeV per turn
+E_inj = 20e9                                   # injection, total energy [eV]
+E_tr  = mass/sqrt(αc)                          # transition: γ = γt = 1/√αc
+n_tr  = (E_tr - E_inj)/(V*sin_φs)              # turn on which the bunch reaches transition
+φs_below, φs_above = asin(sin_φs), π - asin(sin_φs)
+
+const NTR = 1500
+TR_TURNS  = 20000
+TR_SNAP   = [0, 200, 400, 600, 700, 800, 850, 900, 1000, 1200, 1500, 2000, 3000,
+             4000, 6000, 8000, 12000, 16000, 20000]
+TR_TRACE  = [100:10:3000; 3050:50:TR_TURNS]    # turns where the area and centroid are logged
+TR_SWITCH = [10, 100]                          # turns taken by the phase switch
+
+"Bucket edges in φ for stable phase φs: from the unstable fixed point π − φs to the far tip."
+bucket_edges(φs) = φs < π/2 ? (φs - Δφ_sep, π - φs) : (π - φs, φs + Δφ_sep)
+
+"Upper half of the separatrix at total energy E around stable phase φs, as (Δt [ns], ΔE [MeV])."
+function bucket(E, φs; n=80)
+    φu   = π - φs
+    pref = -V/(π*h*slip(E)*beta2(E)*E)
+    φg   = collect(range(bucket_edges(φs)..., length=n))
+    ΔEs  = [beta2(E)*E*sqrt(max(pref*(cos(φ) - cos(φu) + (φ - φu)*sin_φs), 0.0))/1e6 for φ in φg]
+    round.((φg .- φs) ./ ω_rf .* 1e9; digits=2), round.(ΔEs; digits=1)
+end
+
+function cross_transition(nswitch)
+    rng = MersenneTwister(11)
+    φ   = φs_below .+ σφ0 .* randn(rng, NTR)
+    ΔE  = (σφ0*matched_ratio(E_inj)) .* randn(rng, NTR)
+    E, ψ = E_inj, 0.0                          # ψ: how far the RF phase has been shifted
+    t_on  = round(Int, n_tr - nswitch/2)       # the switch is centred on transition
+    alive = trues(NTR)
+    snaps = Dict{Int,Any}(); trace = (t = Int[], A = Float64[], mE = Float64[])
+    for t in 0:TR_TURNS
+        if t > 0
+            Φh, Eh, _ = longitudinal_map(1, φ, ΔE; sin_φs, αc, E0_tot=E, mass, V, h, ramp=true)
+            φ, ΔE = Φh[end, :], Eh[end, :]
+            E += V*sin_φs
+            if t_on < t <= t_on + nswitch      # the RF wave moves by (π − 2φs)/nswitch per turn
+                φ .+= (φs_above - φs_below)/nswitch
+                ψ += (φs_above - φs_below)/nswitch
+            end
+        end
+        φsync = φs_below + ψ                   # the synchronous phase the RF program sets
+        switching = t_on < t < t_on + nswitch
+        if !switching                          # a particle outside the bucket is lost
+            lo, hi = bucket_edges(φsync)
+            alive .&= lo .< φ .< hi
+        end
+        Δt = (φ[alive] .- φsync) ./ ω_rf
+        m  = bunch_moments(Δt, ΔE[alive])
+        if t in TR_TRACE
+            push!(trace.t, t); push!(trace.A, round(m.rms; sigdigits=4))
+            push!(trace.mE, round(m.mE/1e6; digits=1))
+        end
+        shown = 1:min(NPLOT, length(Δt))
+        t in TR_SNAP && (snaps[t] = (Δt = round.(Δt[shown] .* 1e9; digits=2),
+                                     ΔE = round.(Int, ΔE[alive][shown] ./ 1e6),
+                                     m = m, E = E, φsync = φsync, switching = switching,
+                                     lost = NTR - count(alive)))
+    end
+    (snaps = snaps, trace = trace)
+end
+tr_runs = [cross_transition(n) for n in TR_SWITCH]
+
+TR_COLORS = (PALETTE[1], PALETTE[2])
+tr_statics = Any[]
+for (j, (n, run)) in enumerate(zip(TR_SWITCH, tr_runs))
+    push!(tr_statics, line(run.trace.t, run.trace.A; panel=2, color=TR_COLORS[j], label="switch in $n turns"))
+    push!(tr_statics, line(run.trace.t, run.trace.mE; panel=3, color=TR_COLORS[j], label="switch in $n turns"))
+end
+for p in (2, 3)
+    lim = p == 2 ? (0.0, 0.45) : (-200.0, 200.0)
+    push!(tr_statics, line([n_tr, n_tr], collect(lim); panel=p, color="#5b6472", dash=true,
+                           label = p == 2 ? "transition" : nothing))
+end
+
+explorer(
+    title   = "Crossing transition: the RF phase has to jump",
+    sliders = [Knob("turn", TR_SNAP; fmt = string, init = 1),
+               Knob("phase switch", 1:length(TR_SWITCH); fmt = i -> "in $(TR_SWITCH[i]) turns",
+                    init = 1, newline = true)],
+    panels  = [Panel(xlabel="Δt [ns]", ylabel="ΔE [MeV]", title="the bunch in (Δt, ΔE)",
+                     xlim=(-12.5, 12.5), ylim=(-600.0, 600.0), height=300, legend=:bottomleft,
+                     basis="100%"),
+               Panel(xlabel="turn", ylabel="rms area [eV·s]", title="area",
+                     xscale=:log10, xlim=(100.0, 2.0e4), ylim=(0.0, 0.45), height=220,
+                     legend=:topleft, basis="48%", minwidth=260),
+               Panel(xlabel="turn", ylabel="⟨ΔE⟩ [MeV]", title="bunch centroid",
+                     xscale=:log10, xlim=(100.0, 2.0e4), ylim=(-200.0, 200.0), height=220,
+                     legend=:bottomleft, basis="48%", minwidth=260)],
+    statics = tr_statics,
+    note = "The RF phase is switched from φs = 30° to 150°, centred on the transition turn "*
+           "($(round(Int, n_tr))). The dashed bucket is drawn when it fits the plot: near "*
+           "transition η → 0 and its height diverges, and during the switch there is no "*
+           "stable phase to draw it around.",
+) do turn, isw
+    run = tr_runs[isw]
+    s = run.snaps[turn]
+    series = Any[points(s.Δt, s.ΔE; panel=1, color=TR_COLORS[isw], size=1.6, alpha=0.55,
+                        label="protons")]
+    if !s.switching
+        bt, bE = bucket(s.E, s.φsync)
+        if maximum(bE) < 600
+            push!(series, line(bt, bE; panel=1, color=PALETTE[4], dash=true, width=1.6, label="bucket"))
+            push!(series, line(bt, -bE; panel=1, color=PALETTE[4], dash=true, width=1.6))
+        end
+    end
+    k = searchsortedlast(run.trace.t, turn)
+    if k > 0
+        push!(series, points([Float64(turn)], [run.trace.A[k]]; panel=2, color=TR_COLORS[isw], size=5.0))
+        push!(series, points([Float64(turn)], [run.trace.mE[k]]; panel=3, color=TR_COLORS[isw], size=5.0))
+    end
+    γ = s.E/mass
+    (series = series,
+     readouts = ["energy" => string(round(s.E/1e9; digits=2), " GeV"),
+                 "γ / γt" => round(γ*sqrt(αc); digits=3),
+                 "η" => round(slip(s.E); sigdigits=3),
+                 "programmed φs" => string(round(Int, rad2deg(s.φsync)), "°"),
+                 "rms area" => string(round(s.m.rms; sigdigits=3), " eV·s"),
+                 "σt, σE" => string(round(sqrt(s.m.vt)*1e9; digits=2), " ns, ",
+                                    round(sqrt(s.m.vE)/1e6; digits=1), " MeV"),
+                 "⟨ΔE⟩" => string(round(s.m.mE/1e6; digits=1), " MeV"),
+                 "lost" => string(s.lost, " of ", NTR)])
+end
+```
+
+With the 10-turn switch the bunch crosses transition with its rms area intact,
+0.119 → 0.121 eV·s, even though it is squeezed to about half its length on the
+way. With the 100-turn switch it comes out about 160 MeV off energy, oscillates
+about the bucket centre, and filaments to three times its area by 70 GeV.
+
+Real machines go further and also make transition itself pass quickly, with a
+$\gamma_t$ jump: a set of quadrupoles whose current is reversed just as the beam
+arrives, changing $\alpha_c$ and so moving $\gamma_t$ past the beam's $\gamma$.
+RHIC has eight such quadrupoles in each sextant, and reverses their current in
+40–60 ms; that is short enough for its ions to cross transition with no
+particle loss and negligible growth of the bunch area.[^gtjump]
+
+[^gtjump]: J. Mi *et al.*, "RHIC Gamma Transition Jump Power Supply Prototype
+    Test", PAC 2001, BNL-68035, <https://www.osti.gov/servlets/purl/783176>.

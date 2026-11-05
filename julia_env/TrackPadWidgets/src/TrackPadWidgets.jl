@@ -202,23 +202,25 @@ function lattice_strip(glyphs, span; panel::Int = 1, ymax::Real = 1.0,
 end
 
 """
-    Knob(label, values; fmt=string, init=1)
+    Knob(label, values; fmt=string, init=1, newline=false)
 
 One interactive axis of the parameter grid.  `values` are the physical
 parameter values handed to the `explorer` body; `fmt` turns each into the
 string shown next to the slider.  `init` is the 1-based index selected when the
-page loads.
+page loads.  `newline=true` starts this slider on a new line of the control
+bar, which keeps a slider with long value labels in one place.
 """
 struct Knob
     label::String
     values::Vector{Any}
     labels::Vector{String}
     init::Int
+    newline::Bool
 end
 
-function Knob(label::AbstractString, values; fmt = string, init::Int = 1)
+function Knob(label::AbstractString, values; fmt = string, init::Int = 1, newline::Bool = false)
     v = collect(values)
-    Knob(String(label), Any[v...], String[string(fmt(x)) for x in v], init)
+    Knob(String(label), Any[v...], String[string(fmt(x)) for x in v], init, newline)
 end
 
 """
@@ -283,6 +285,9 @@ end
 # the widget itself
 # ---------------------------------------------------------------------------
 
+# Read at precompile time; include_dependency makes an edit to widget.js
+# trigger recompilation instead of being silently ignored.
+include_dependency(joinpath(@__DIR__, "widget.js"))
 const _JS = read(joinpath(@__DIR__, "widget.js"), String)
 
 """
@@ -395,7 +400,8 @@ function explorer(body; sliders::Vector{Knob}, panels::Vector{Panel},
         "play" => play ? nothing : false,
         "interval" => interval,
         "sliders" => [Dict{String,Any}("label" => s.label, "values" => s.labels,
-                                       "init" => clamp(s.init, 1, length(s.values)) - 1)
+                                       "init" => clamp(s.init, 1, length(s.values)) - 1,
+                                       "newline" => s.newline ? true : nothing)
                       for s in sliders],
         "panels" => pspec,
         "statics" => isempty(statics) ? nothing : collect(statics),

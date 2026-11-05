@@ -476,6 +476,7 @@
         });
       }
 
+      var firstCtl = null;
       spec.sliders.forEach(function (s, i) {
         var d = document.createElement('div');
         d.className = 'tpw-ctl';
@@ -487,10 +488,20 @@
         inp.setAttribute('aria-label', s.label);
         var v = document.createElement('span');
         v.className = 'tpw-val';
+        // Reserve room for the longest value label, so the control keeps its
+        // width (and its line) while the slider moves.
+        var longest = s.values.reduce(function (m, t) { return Math.max(m, String(t).length); }, 0);
+        v.style.minWidth = 'max(5.2em, ' + longest + 'ch)';
         vals.push(v);
         inp.addEventListener('input', function () { idx[i] = +inp.value; render(); });
         d.appendChild(lab); d.appendChild(inp); d.appendChild(v);
+        if (s.newline) {
+          var br = document.createElement('div');       // full-width, empty: forces a new line
+          br.style.flexBasis = '100%'; br.style.height = '0'; br.style.margin = '-.2rem 0';
+          ctls.appendChild(br);
+        }
         ctls.appendChild(d);
+        if (i === 0) firstCtl = d;
       });
 
       if (spec.play !== false && spec.sliders.length) {
@@ -512,7 +523,8 @@
             render();
           }, spec.interval || 90);
         });
-        ctls.appendChild(btn);
+        // The button drives the first slider, so it sits right after it.
+        ctls.insertBefore(btn, firstCtl.nextSibling);
       }
 
       var ro = window.ResizeObserver ? new ResizeObserver(render) : null;
