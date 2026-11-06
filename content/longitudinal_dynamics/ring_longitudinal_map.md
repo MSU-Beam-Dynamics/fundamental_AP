@@ -627,170 +627,217 @@ end
 ## Crossing transition
 
 The RHIC-like ring of this chapter injects protons at 20 GeV, below the
-transition energy $\gamma_t=1/\sqrt{\alpha_c}\approx 23.6$ (22.1 GeV total), and
+transition energy $\gamma_T=1/\sqrt{\alpha_c}\approx 23.6$ (22.1 GeV total), and
 accelerates them to 250 GeV, so its ramp crosses transition. (In the real RHIC
 it is the heavy ions that are injected below transition; protons arrive above
-it.[^gtjump]) There $\eta$ changes sign, and by
-the stability condition $\eta\cos\phi_s<0$ the stable phase moves from $\phi_s$
-to $\pi-\phi_s$: with $\sin\phi_s=0.5$, from $30^\circ$ to $150^\circ$. At the
-moment of crossing the RF system has to shift its phase by
-$\pi-2\phi_s=120^\circ$, and it has to do so abruptly. On its way from
-$30^\circ$ to $150^\circ$ the phase passes the crest, so during the switch the
-synchronous particle gains more than the $eV\sin\phi_s$ that the magnet ramp
-asks for, and the whole bunch ends up off energy. (Centring the switch on
-transition at least keeps the bunch on the focusing slope throughout: the phase
-is below $90^\circ$ while $\eta<0$ and above $90^\circ$ once $\eta>0$.)
+it.[^gtjump]) There $\eta$ changes sign, and by the stability condition
+$\eta\cos\phi_s<0$ the stable phase has to move from $\phi_s$ to $\pi-\phi_s$.
+The RF system makes that switch within about ten turns, so the switch itself
+costs little. What matters is how fast the beam's energy, and with it $\eta$,
+passes through transition.
 
-Transition is hard on the bunch even with a perfect jump. As $\eta\to 0$ the
-synchrotron motion freezes, so the motion stops being adiabatic, and the bunch
-becomes short with a large energy spread.
+### Near transition energy
 
-The figure below ramps a matched bunch from 20 GeV with the map of this chapter,
-2.5 MeV per turn, so transition comes at turn 844. The phase is switched either
-over 10 turns or over 100 turns, centred on the crossing. $\Delta t$ is measured
-from the synchronous phase that the RF program sets on that turn.
+As the beam nears transition, $\eta$ and with it the synchrotron frequency fall
+to zero. Within a characteristic time $\tau_{ad}$ of the crossing the bunch can
+no longer follow its bucket adiabatically, and its shape freezes. $\tau_{ad}$
+scales as $\dot\gamma^{-1/3}$ and is about 11 ms for this ring at RHIC's
+$\dot\gamma\approx 1.6\ \mathrm{s^{-1}}$. The motion stays linear, though, so the
+bunch's rms area survives the crossing.
+
+### The nonlinear effect
+
+The slip itself depends on each particle's momentum. To second order,
+
+$$
+\frac{\Delta T}{T_0}=\eta_0\,\delta+\eta_1\,\delta^2,
+\qquad
+\eta_1=\alpha_1-\frac{\alpha_0}{\gamma^2}+\frac{2+\beta^2}{2\gamma^2}
+\;\approx\;\alpha_1+\tfrac32\,\alpha_0\ \text{ near transition},
+$$
+
+where $\alpha_1$ is the second-order momentum compaction. A particle with
+momentum deviation $\delta$ sees the slip factor $\eta_0+\eta_1\delta$, and so
+crosses its own transition at $t=-\eta_1\delta/\dot\eta_0$ instead of $t=0$,
+with $\dot\eta_0=2\dot\gamma/\gamma_T^3$. Across a bunch of half-width
+$\hat\delta$ the crossings are spread over the **nonlinear time**
+
+$$
+T_{nl}=\frac{\eta_1\hat\delta}{\dot\eta_0}
+=\left(\frac{\alpha_1}{\alpha_0}+\frac32\right)\frac{\hat\delta\,\gamma_T}{2\dot\gamma},
+$$
+
+and for as long as it lasts, part of the bunch sits on the side of transition
+where the RF phase defocuses it. This is the Johnsen effect. $T_{nl}$ grows as
+$1/\dot\gamma$, while $\tau_{ad}$ grows only as $\dot\gamma^{-1/3}$, so a slow
+ramp lets the nonlinear time win. For the bunch below, with $\alpha_1=0$ and
+$\hat\delta=3\sigma_\delta\approx 6\times10^{-3}$ at transition,
+$T_{nl}\approx 66$ ms, six times $\tau_{ad}$.
+
+### The $\gamma_t$ jump
+
+The cure is to make transition pass quickly without accelerating the beam any
+faster. A set of quadrupoles is pulsed to change $\alpha_c$, and with it
+$\gamma_T$: $\eta$ then changes at the rate $2(\dot\gamma-\dot\gamma_T)/\gamma_T^3$,
+as if the beam were accelerated at $\dot\gamma-\dot\gamma_T$. RHIC does this with
+eight quadrupoles in each sextant, whose current is reversed in 40–60 ms; that is
+short enough for its ions to cross transition with no particle loss and
+negligible growth of the bunch area.[^gtjump] Here a jump of one unit of
+$\gamma_T$ in 40 ms makes $\dot\gamma-\dot\gamma_T\approx 27\ \mathrm{s^{-1}}$,
+which shortens $\tau_{ad}$ to about 4 ms and $T_{nl}$ to a few milliseconds.
+
+The figure below follows a matched bunch, 0.17 ns rms long at injection, from
+20 GeV through transition at $\dot\gamma=1.6\ \mathrm{s^{-1}}$, with the map of
+this chapter extended to second order in $\delta$ and $\alpha_1=0$, which leaves
+only the kinematic part of $\eta_1$. The RF phase is switched in 10 turns at the
+crossing. With the $\gamma_t$ jump, $\gamma_T$ is held half a unit above its
+nominal value and then dropped by one unit in 40 ms, centred on the crossing.
+Time is counted from transition.
 
 ```{code-cell} julia
 :tags: [hide-input]
 
-# RHIC-like ramp through transition: the reference gains eV sin φs = 2.5 MeV per turn
-E_inj = 20e9                                   # injection, total energy [eV]
-E_tr  = mass/sqrt(αc)                          # transition: γ = γt = 1/√αc
-n_tr  = (E_tr - E_inj)/(V*sin_φs)              # turn on which the bunch reaches transition
-φs_below, φs_above = asin(sin_φs), π - asin(sin_φs)
+# RHIC-like ramp through transition at RHIC's rate. Uses mass, αc, V, h, ω_rf, slip,
+# beta2, matched_ratio, bunch_moments and NPLOT from the cells above.
+const T_REV   = h/28.15e6                      # revolution period [s]
+const DE_TURN = 1.6*T_REV*mass                 # γ̇ = 1.6/s: reference gain per turn ≈ 19 keV
+const E_INJ   = 20e9                           # injection, total energy [eV]
+const γT0     = 1/sqrt(αc)                     # nominal transition gamma
+const N_TR    = round(Int, (γT0*mass - E_INJ)/DE_TURN)   # turn on which γ = γt
+const NSWITCH = 10                             # the RF phase switch takes 10 turns
+const ΔγT     = 1.0                            # γt jump: one unit ...
+const N_JUMP  = round(Int, 0.040/T_REV)        # ... in 40 ms
+const α1      = 0.0                            # second-order momentum compaction
+const M_TR, V_TR, H_TR = Float64(mass), Float64(V), Float64(h)   # typed copies for the turn loop
+φs_low = asin(DE_TURN/V); φs_high = π - φs_low # stable phase below and above transition
 
-const NTR = 1500
-TR_TURNS  = 20000
-TR_SNAP   = [0, 200, 400, 600, 700, 800, 850, 900, 1000, 1200, 1500, 2000, 3000,
-             4000, 6000, 8000, 12000, 16000, 20000]
-TR_TRACE  = [100:10:3000; 3050:50:TR_TURNS]    # turns where the area and centroid are logged
-TR_SWITCH = [10, 100]                          # turns taken by the phase switch
+"Synchronous phase on turn t: switched in NSWITCH turns at transition."
+φs_on(t) = φs_low + (φs_high - φs_low)*clamp((t - N_TR + NSWITCH/2)/NSWITCH, 0.0, 1.0)
+"γt on turn t: nominal, or held ΔγT/2 above it and dropped by ΔγT over N_JUMP turns."
+γt_on(t, jump) = jump ? γT0 + ΔγT/2 - ΔγT*clamp((t - N_TR + N_JUMP/2)/N_JUMP, 0.0, 1.0) : γT0
+ms(t) = (t - N_TR)*T_REV*1e3                   # time from transition [ms]
 
-"Bucket edges in φ for stable phase φs: from the unstable fixed point π − φs to the far tip."
-bucket_edges(φs) = φs < π/2 ? (φs - Δφ_sep, π - φs) : (π - φs, φs + Δφ_sep)
+"""
+    transition_turn!(φ, ΔE, E, φs, αc)
 
-"Upper half of the separatrix at total energy E around stable phase φs, as (Δt [ns], ΔE [MeV])."
-function bucket(E, φs; n=80)
-    φu   = π - φs
-    pref = -V/(π*h*slip(E)*beta2(E)*E)
-    φg   = collect(range(bucket_edges(φs)..., length=n))
-    ΔEs  = [beta2(E)*E*sqrt(max(pref*(cos(φ) - cos(φu) + (φ - φu)*sin_φs), 0.0))/1e6 for φ in φg]
-    round.((φg .- φs) ./ ω_rf .* 1e9; digits=2), round.(ΔEs; digits=1)
+One turn of the map of this chapter with the phase slip taken to second order,
+ΔT/T₀ = η₀δ + η₁δ². The reference gains eV sin φs; returns its new energy.
+"""
+function transition_turn!(φ, ΔE, E, φs, αc)
+    sφ = sin(φs)
+    @inbounds for i in eachindex(φ)
+        ΔE[i] += V_TR*(sin(φ[i]) - sφ)         # RF kick
+    end
+    E += V_TR*sφ                               # the reference follows the phase program
+    γ2 = (E/M_TR)^2; β2 = 1 - 1/γ2
+    η0 = αc - 1/γ2
+    η1 = α1 - αc/γ2 + (2 + β2)/(2γ2)
+    @inbounds for i in eachindex(φ)
+        δ = ΔE[i]/(β2*E)
+        φ[i] += 2π*H_TR*(η0*δ + η1*δ^2)
+    end
+    E
 end
 
-function cross_transition(nswitch)
-    rng = MersenneTwister(11)
-    φ   = φs_below .+ σφ0 .* randn(rng, NTR)
-    ΔE  = (σφ0*matched_ratio(E_inj)) .* randn(rng, NTR)
-    E, ψ = E_inj, 0.0                          # ψ: how far the RF phase has been shifted
-    t_on  = round(Int, n_tr - nswitch/2)       # the switch is centred on transition
+const NTR    = 2000
+const σφ_TR  = 0.03                            # rms bunch length at injection [rad]
+TR_SNAP_MS   = [-100, -50, -30, -20, -10, -5, 0, 5, 10, 20, 30, 50, 100, 200]
+TR_SNAP      = [N_TR + round(Int, m*1e-3/T_REV) for m in TR_SNAP_MS]
+TR_LOG       = N_TR + round(Int, -0.1/T_REV) : 50 : N_TR + round(Int, 0.2/T_REV)
+TR_CASES     = [("no γt jump", false), ("γt jump, 1 unit in 40 ms", true)]
+
+function cross_transition(jump)
+    rng = MersenneTwister(5)
+    r   = matched_ratio(E_INJ)                 # every case starts from the same bunch
+    φ   = φs_low .+ σφ_TR .* randn(rng, NTR)
+    ΔE  = (σφ_TR*r) .* randn(rng, NTR)
+    E   = E_INJ
+    A0  = bunch_moments(φ ./ ω_rf, ΔE).rms
     alive = trues(NTR)
-    snaps = Dict{Int,Any}(); trace = (t = Int[], A = Float64[], mE = Float64[])
-    for t in 0:TR_TURNS
-        if t > 0
-            Φh, Eh, _ = longitudinal_map(1, φ, ΔE; sin_φs, αc, E0_tot=E, mass, V, h, ramp=true)
-            φ, ΔE = Φh[end, :], Eh[end, :]
-            E += V*sin_φs
-            if t_on < t <= t_on + nswitch      # the RF wave moves by (π − 2φs)/nswitch per turn
-                φ .+= (φs_above - φs_below)/nswitch
-                ψ += (φs_above - φs_below)/nswitch
-            end
+    snaps = Dict{Int,Any}(); trace = (ms = Float64[], kept = Float64[], gap = Float64[])
+    for t in 1:last(TR_SNAP)
+        φ .+= φs_on(t) - φs_on(t - 1)          # the RF wave moves under the bunch
+        E = transition_turn!(φ, ΔE, E, φs_on(t), 1/γt_on(t, jump)^2)
+        (t in TR_LOG || t in TR_SNAP) || continue
+        alive .&= abs.(φ .- φs_on(t)) .< π     # half an RF period away: out of the bucket
+        if t in TR_LOG
+            push!(trace.ms, round(ms(t); digits=2))
+            push!(trace.kept, round(100*count(alive)/NTR; digits=1))
+            push!(trace.gap, round(E/mass - γt_on(t, jump); digits=3))
         end
-        φsync = φs_below + ψ                   # the synchronous phase the RF program sets
-        switching = t_on < t < t_on + nswitch
-        if !switching                          # a particle outside the bucket is lost
-            lo, hi = bucket_edges(φsync)
-            alive .&= lo .< φ .< hi
+        if t in TR_SNAP
+            Δt = (φ[alive] .- φs_on(t)) ./ ω_rf
+            m  = bunch_moments(Δt, ΔE[alive])
+            shown = 1:min(NPLOT, length(Δt))
+            γ2 = (E/mass)^2
+            snaps[t] = (Δt = round.(Δt[shown] .* 1e9; digits=3),
+                        ΔE = round.(ΔE[alive][shown] ./ 1e6; digits=1),
+                        m = m, A0 = A0, E = E,
+                        γt = γt_on(t, jump), kept = count(alive),
+                        η0 = 1/γt_on(t, jump)^2 - 1/γ2,
+                        η1 = α1 - 1/(γt_on(t, jump)^2*γ2) + (3 - 1/γ2)/(2γ2))
         end
-        Δt = (φ[alive] .- φsync) ./ ω_rf
-        m  = bunch_moments(Δt, ΔE[alive])
-        if t in TR_TRACE
-            push!(trace.t, t); push!(trace.A, round(m.rms; sigdigits=4))
-            push!(trace.mE, round(m.mE/1e6; digits=1))
-        end
-        shown = 1:min(NPLOT, length(Δt))
-        t in TR_SNAP && (snaps[t] = (Δt = round.(Δt[shown] .* 1e9; digits=2),
-                                     ΔE = round.(Int, ΔE[alive][shown] ./ 1e6),
-                                     m = m, E = E, φsync = φsync, switching = switching,
-                                     lost = NTR - count(alive)))
     end
     (snaps = snaps, trace = trace)
 end
-tr_runs = [cross_transition(n) for n in TR_SWITCH]
+tr_runs = [cross_transition(j) for (_, j) in TR_CASES]
 
-TR_COLORS = (PALETTE[1], PALETTE[2])
+TR_COLORS = (PALETTE[2], PALETTE[3])
 tr_statics = Any[]
-for (j, (n, run)) in enumerate(zip(TR_SWITCH, tr_runs))
-    push!(tr_statics, line(run.trace.t, run.trace.A; panel=2, color=TR_COLORS[j], label="switch in $n turns"))
-    push!(tr_statics, line(run.trace.t, run.trace.mE; panel=3, color=TR_COLORS[j], label="switch in $n turns"))
+for (j, ((label, _), run)) in enumerate(zip(TR_CASES, tr_runs))
+    push!(tr_statics, line(run.trace.ms, run.trace.kept; panel=2, color=TR_COLORS[j], label=label))
+    push!(tr_statics, line(run.trace.ms, run.trace.gap; panel=3, color=TR_COLORS[j], label=label))
 end
-for p in (2, 3)
-    lim = p == 2 ? (0.0, 0.45) : (-200.0, 200.0)
-    push!(tr_statics, line([n_tr, n_tr], collect(lim); panel=p, color="#5b6472", dash=true,
-                           label = p == 2 ? "transition" : nothing))
-end
+push!(tr_statics, line([-100.0, 200.0], [0.0, 0.0]; panel=3, color="#5b6472", dash=true))
 
 explorer(
-    title   = "Crossing transition: the RF phase has to jump",
-    sliders = [Knob("turn", TR_SNAP; fmt = string, init = 1),
-               Knob("phase switch", 1:length(TR_SWITCH); fmt = i -> "in $(TR_SWITCH[i]) turns",
-                    init = 1, newline = true)],
+    title   = "Crossing transition at γ̇ = 1.6/s: the γt jump",
+    sliders = [Knob("time from transition", TR_SNAP; fmt = t -> string(round(Int, ms(t)), " ms"),
+                    init = 1),
+               Knob("ramp", 1:length(TR_CASES); fmt = i -> TR_CASES[i][1], init = 1,
+                    newline = true)],
     panels  = [Panel(xlabel="Δt [ns]", ylabel="ΔE [MeV]", title="the bunch in (Δt, ΔE)",
-                     xlim=(-12.5, 12.5), ylim=(-600.0, 600.0), height=300, legend=:bottomleft,
+                     xlim=(-6.0, 6.0), ylim=(-500.0, 500.0), height=300, legend=:bottomleft,
                      basis="100%"),
-               Panel(xlabel="turn", ylabel="rms area [eV·s]", title="area",
-                     xscale=:log10, xlim=(100.0, 2.0e4), ylim=(0.0, 0.45), height=220,
-                     legend=:topleft, basis="48%", minwidth=260),
-               Panel(xlabel="turn", ylabel="⟨ΔE⟩ [MeV]", title="bunch centroid",
-                     xscale=:log10, xlim=(100.0, 2.0e4), ylim=(-200.0, 200.0), height=220,
-                     legend=:bottomleft, basis="48%", minwidth=260)],
+               Panel(xlabel="time from transition [ms]", ylabel="still in the bucket [%]",
+                     title="captured beam", xlim=(-100.0, 200.0), ylim=(0.0, 105.0), height=220,
+                     legend=:bottomleft, basis="48%", minwidth=260),
+               Panel(xlabel="time from transition [ms]", ylabel="γ − γt", title="distance from transition",
+                     xlim=(-100.0, 200.0), ylim=(-0.8, 0.8), height=220, legend=:topleft,
+                     basis="48%", minwidth=260)],
     statics = tr_statics,
-    note = "The RF phase is switched from φs = 30° to 150°, centred on the transition turn "*
-           "($(round(Int, n_tr))). The dashed bucket is drawn when it fits the plot: near "*
-           "transition η → 0 and its height diverges, and during the switch there is no "*
-           "stable phase to draw it around.",
-) do turn, isw
-    run = tr_runs[isw]
-    s = run.snaps[turn]
-    series = Any[points(s.Δt, s.ΔE; panel=1, color=TR_COLORS[isw], size=1.6, alpha=0.55,
+    note = "Both ramps switch the RF phase in 10 turns at the crossing. η₁·3σδ is the spread "*
+           "of slip factors across the bunch: once it exceeds |η₀|, the high-energy tail is "*
+           "already across transition while the rest is not. The bucket itself is far larger "*
+           "than this view: ±18 ns, and more than 1 GeV high.",
+) do t, icase
+    run = tr_runs[icase]
+    s = run.snaps[t]
+    series = Any[points(s.Δt, s.ΔE; panel=1, color=TR_COLORS[icase], size=1.6, alpha=0.55,
                         label="protons")]
-    if !s.switching
-        bt, bE = bucket(s.E, s.φsync)
-        if maximum(bE) < 600
-            push!(series, line(bt, bE; panel=1, color=PALETTE[4], dash=true, width=1.6, label="bucket"))
-            push!(series, line(bt, -bE; panel=1, color=PALETTE[4], dash=true, width=1.6))
-        end
-    end
-    k = searchsortedlast(run.trace.t, turn)
+    k = searchsortedlast(run.trace.ms, ms(t) + 1e-6)
     if k > 0
-        push!(series, points([Float64(turn)], [run.trace.A[k]]; panel=2, color=TR_COLORS[isw], size=5.0))
-        push!(series, points([Float64(turn)], [run.trace.mE[k]]; panel=3, color=TR_COLORS[isw], size=5.0))
+        push!(series, points([run.trace.ms[k]], [run.trace.kept[k]]; panel=2, color=TR_COLORS[icase], size=5.0))
+        push!(series, points([run.trace.ms[k]], [run.trace.gap[k]]; panel=3, color=TR_COLORS[icase], size=5.0))
     end
-    γ = s.E/mass
+    σδ = sqrt(s.m.vE)/(beta2(s.E)*s.E)
     (series = series,
-     readouts = ["energy" => string(round(s.E/1e9; digits=2), " GeV"),
-                 "γ / γt" => round(γ*sqrt(αc); digits=3),
-                 "η" => round(slip(s.E); sigdigits=3),
-                 "programmed φs" => string(round(Int, rad2deg(s.φsync)), "°"),
-                 "rms area" => string(round(s.m.rms; sigdigits=3), " eV·s"),
+     readouts = ["γ − γt" => round(s.E/mass - s.γt; digits=3),
+                 "|η₀|" => round(abs(s.η0); sigdigits=2),
+                 "η₁·3σδ" => round(3*s.η1*σδ; sigdigits=2),
+                 "still in the bucket" => string(round(100*s.kept/NTR; digits=1), " %"),
+                 "rms area of those in the bucket" => string(round(s.m.rms/s.A0; digits=2), " × start"),
                  "σt, σE" => string(round(sqrt(s.m.vt)*1e9; digits=2), " ns, ",
-                                    round(sqrt(s.m.vE)/1e6; digits=1), " MeV"),
-                 "⟨ΔE⟩" => string(round(s.m.mE/1e6; digits=1), " MeV"),
-                 "lost" => string(s.lost, " of ", NTR)])
+                                    round(sqrt(s.m.vE)/1e6; digits=1), " MeV")])
 end
 ```
 
-With the 10-turn switch the bunch crosses transition with its rms area intact,
-0.119 → 0.121 eV·s, even though it is squeezed to about half its length on the
-way. With the 100-turn switch it comes out about 160 MeV off energy, oscillates
-about the bucket centre, and filaments to three times its area by 70 GeV.
-
-Real machines go further and also make transition itself pass quickly, with a
-$\gamma_t$ jump: a set of quadrupoles whose current is reversed just as the beam
-arrives, changing $\alpha_c$ and so moving $\gamma_t$ past the beam's $\gamma$.
-RHIC has eight such quadrupoles in each sextant, and reverses their current in
-40–60 ms; that is short enough for its ions to cross transition with no
-particle loss and negligible growth of the bunch area.[^gtjump]
+Without the jump, the bunch's high-energy tail reaches transition first. From
+about 50 ms before the crossing $\eta_1\cdot 3\sigma_\delta$ overtakes
+$|\eta_0|$ and the bunch starts to tear apart, and by the time the rest of it has
+crossed, 63 % of it has left the bucket. With the $\gamma_t$ jump, $|\eta_0|$
+stays well above the spread of slip factors until the last few milliseconds:
+every particle stays in the bucket, and the rms area grows by only about 13 %.
 
 [^gtjump]: J. Mi *et al.*, "RHIC Gamma Transition Jump Power Supply Prototype
     Test", PAC 2001, BNL-68035, <https://www.osti.gov/servlets/purl/783176>.
