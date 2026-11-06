@@ -31,6 +31,13 @@ works in cycles: inject at low field, ramp the field and the RF together while
 accelerating, hold at flat top while the beam is extracted or stored, then ramp
 back down for the next cycle.
 
+
+```{figure} ../images/synchrotron/synchrotron_cycle.png
+:width: 70%
+:name: fig-synchrotron-cycle
+A synchrotron cycle. The beam is injected at low field, accelerated while the bending field $B$ and the momentum $pc$ ramp together, held at flat top while it is ejected, and the magnets then recover for the next cycle. The orbit stays fixed throughout.
+```
+
 ## Early synchrotrons
 
 - **Cosmotron**, Brookhaven National Laboratory — the first proton synchrotron
@@ -39,6 +46,25 @@ back down for the next cycle.
 - **ADA** (*Anello Di Accumulazione*), Frascati, 1961–1964 — a 250 MeV
   electron–positron storage ring, the first machine to store and collide beams
   of matter and antimatter.
+
+
+```{figure} ../images/synchrotron/first_synchrotron.jpg
+:width: 55%
+:name: fig-first-synchrotron
+The first synchrotron.
+```
+
+```{figure} ../images/synchrotron/cosmotron.jpg
+:width: 80%
+:name: fig-cosmotron
+The Cosmotron at Brookhaven National Laboratory, a weak-focusing proton synchrotron that reached 3.3 GeV.
+```
+
+```{figure} ../images/synchrotron/ada.jpg
+:width: 60%
+:name: fig-ada
+ADA (*Anello Di Accumulazione*) at Frascati, the 250 MeV ring in which electrons and positrons were first stored and collided.
+```
 
 ## Operating principle
 
@@ -67,6 +93,32 @@ $$
 B\rho\,[\mathrm{T\,m}] = \frac{P\,[\mathrm{GeV}/c]}{0.2998}.
 $$
 
+
+```{code-cell} julia
+:tags: [hide-input]
+:label: fig-synchronization
+:caption: Synchronization in a proton synchrotron of fixed radius. The revolution frequency, relative to that of a particle moving at the speed of light, is $\beta$ (left axis); the magnetic rigidity $B\rho$ (right axis) grows with the momentum. Above a few GeV the frequency hardly changes, while $B\rho$ keeps growing.
+
+using CairoMakie, TrackPadWidgets
+
+mp = 0.93827                                    # proton rest energy [GeV]
+K  = exp10.(range(-1, 2, length=300))           # kinetic energy [GeV]
+β  = @. sqrt(1 - (mp/(K + mp))^2)               # f / f(v = c)
+Bρ = @. sqrt((K + mp)^2 - mp^2)/0.299792458     # P/q in T·m, P in GeV/c
+
+fig = Figure(size=(720, 360), fontsize=15)
+ax1 = Axis(fig[1, 1]; xscale=log10, xlabel="kinetic energy [GeV]",
+           ylabel="revolution frequency  f / f(v = c)", limits=(nothing, (0.3, 1.05)))
+ax2 = Axis(fig[1, 1]; xscale=log10, yscale=log10, yaxisposition=:right, ylabel="Bρ [T·m]",
+           limits=(nothing, (0.1, 1000)))
+hidespines!(ax2); hidexdecorations!(ax2); linkxaxes!(ax1, ax2)
+l1 = lines!(ax1, K, β; color=PALETTE[1], linewidth=2.5)
+l2 = lines!(ax2, K, Bρ; color=PALETTE[2], linewidth=2.5)
+axislegend(ax1, [l1, l2], ["frequency (left)", "Bρ (right)"]; position=:rc, framevisible=false)
+fig
+```
+
+
 ## Energy dynamic range and accelerator complexes
 
 No single accelerator takes particles from the source all the way to a high
@@ -94,6 +146,31 @@ The two complexes below are typical:
 - **Brookhaven (RHIC)**: EBIS ion source / linac → Booster (200 MeV protons, or
   2 MeV/nucleon ions → 100 MeV/nucleon) → AGS (Alternating Gradient Synchrotron,
   ions to about 9 GeV/nucleon) → AGS-to-RHIC transfer line → RHIC.
+
+
+```{figure} ../images/synchrotron/lhc_complex.png
+:width: 90%
+:name: fig-lhc-complex
+The CERN accelerator complex that feeds the LHC.
+```
+
+```{figure} ../images/synchrotron/cern_synchrotrons.jpg
+:width: 100%
+:name: fig-cern-synchrotrons
+The synchrotrons of the LHC injector chain: the Proton Synchrotron Booster (50 MeV → 1.4 GeV), the Low Energy Ion Ring, the Proton Synchrotron (1.4 → 25 GeV, 628 m) and the Super Proton Synchrotron (25 → 450 GeV, 7 km).
+```
+
+```{figure} ../images/synchrotron/rhic_cern_complexes.png
+:width: 100%
+:name: fig-rhic-cern-complexes
+The RHIC complex (left): 1 EBIS ion source, 2 linac, 3 Booster, 4 AGS, 5 AGS-to-RHIC line, 6 RHIC. The CERN complex is shown on the right for comparison.
+```
+
+```{figure} ../images/synchrotron/rhic_booster_ags.jpg
+:width: 100%
+:name: fig-rhic-booster-ags
+Synchrotrons in the RHIC complex: the Booster, from 200 MeV protons or 2 MeV/nucleon ions to 100 MeV/nucleon (left), and the Alternating Gradient Synchrotron, to about 9 GeV/nucleon (right).
+```
 
 [^liu]: These are the energies of the LHC injector chain before the 2021
     upgrade; since then Linac4 injects H⁻ into the PSB at 160 MeV and the PSB

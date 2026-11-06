@@ -18,6 +18,36 @@ lowest energy, the injection energy. In practice there is more to it:
 - so the elements that steer the new beam onto the closed orbit have to be
   pulsed — *time-dependent* kicks, switched on for the injected beam only.
 
+
+```{code-cell} julia
+:tags: [hide-input]
+:label: fig-bunch-filling
+:caption: Box-car filling: bunches from a smaller ring A are transferred into the buckets of ring B one batch at a time, until B is full.
+
+using CairoMakie, TrackPadWidgets
+
+"Bunch positions on a ring of radius r centred at c, starting at the top and going clockwise."
+ring_slots(c, r, n) = [(c[1] + r*sin(2π*(k - 1)/n), c[2] + r*cos(2π*(k - 1)/n)) for k in 1:n]
+
+let cB = (0.0, 0.0), rB = 1.0, cA = (-1.05, -1.05), rA = 0.42, nA = 8, nB = 16
+    stages = [("ring A filled", true, 0), ("first transfer", false, nA),
+              ("A refilled", true, nA), ("B full", false, nB)]
+    fig = Figure(size=(960, 280), fontsize=15)
+    for (j, (title, a_full, nb)) in enumerate(stages)
+        ax = Axis(fig[1, j]; aspect=DataAspect(), title=title, limits=(-1.6, 1.15, -1.6, 1.15))
+        hidedecorations!(ax); hidespines!(ax)
+        θ = range(0, 2π, length=200)
+        for (c, r, name) in ((cB, rB, "B"), (cA, rA, "A"))
+            lines!(ax, c[1] .+ r .* cos.(θ), c[2] .+ r .* sin.(θ); color=:gray60)
+            text!(ax, c...; text=name, align=(:center, :center), fontsize=17)
+        end
+        a_full && scatter!(ax, ring_slots(cA, rA, nA); color=PALETTE[2], markersize=11)
+        nb > 0 && scatter!(ax, ring_slots(cB, rB, nB)[1:nb]; color=PALETTE[1], markersize=11)
+    end
+    fig
+end
+```
+
 ## Normalized phase space
 
 Injection and extraction are easiest to follow in **normalized phase space**.
@@ -111,6 +141,19 @@ the injected bunch is deflected. Bunches already in the ring miss the septum
 because they are separated from the injected beam in *space*, and miss the kick
 because they are separated from it in *time*.
 
+
+```{figure} ../images/synchrotron/one_turn_injection.png
+:width: 85%
+:name: fig-one-turn-injection
+Single-turn injection. The transfer line brings the beam through the septum magnet, closed-orbit bumpers move the circulating orbit close to the septum, and the kicker puts the injected beam onto the closed orbit. Inset: 'box-car' stacking, with the kicker field switched on for the injected bunch only.
+```
+
+```{figure} ../images/synchrotron/injection_layouts.png
+:width: 90%
+:name: fig-injection-layouts
+Real injection layouts. Top: RHIC's six o'clock insertion, with the injection equipment of the yellow ring. Bottom: LHC injection, with the septum deflecting in the horizontal plane and the kicker in the vertical.
+```
+
 **How strong must the kick be?** Let the septum (point 0) and the kicker
 (point 1) be separated by a betatron phase advance $\mu$. The transfer
 matrix between two points with known Courant–Snyder parameters is
@@ -137,8 +180,9 @@ $$
 The kick is smallest for $\mu=\pi/2$. A quarter of a betatron oscillation turns
 the septum's displacement into a pure angle at the kicker, which the kicker then
 removes. In normalized phase space that is three steps: a displacement, a
-rotation by 90°, and a kick back to the origin. The widget below lets you change
-the phase advance of the cell between the two magnets:
+rotation by 90°, and a kick back to the origin. The widget below shows those
+three steps, and lets you change the phase advance of the cell between the two
+magnets:
 
 ```{code-cell} julia
 :tags: [hide-input]
@@ -214,10 +258,24 @@ instead: the circulating beam passes through a field-free hole in the yoke, and
 the deflection is perpendicular to the plane in which the two beams were
 separated.
 
+
+```{figure} ../images/synchrotron/septum.jpg
+:width: 95%
+:name: fig-septum
+Septum magnets: a septum with its coil (left), the cross-section of a current septum, whose thin coil separates the field-free region from the deflecting field $B_0$ (top right), and a Lambertson septum, where a thin steel wall does the same and the circulating beam passes through the field-free hole (bottom right).
+```
+
 A **kicker** is a fast pulsed magnet, usually with a ferrite yoke. Its rise and
 fall times must fit into the gaps between bunches, and its flat top must be as
 long as the injected bunch train. This is why the filling pattern of a ring
 leaves gaps for the kicker.
+
+
+```{figure} ../images/synchrotron/injection_kicker.png
+:width: 90%
+:name: fig-injection-kicker
+The RHIC injection kicker (left) and a measured kicker current pulse (right): the bunch is injected while the pulse is at its top.
+```
 
 ## Injection errors and filamentation
 
@@ -233,10 +291,70 @@ real beam has a tune spread, from
 Particles with different tunes rotate at different rates, so the bunch smears
 around the circle: it **filaments**. The centroid oscillation decoheres, and
 eventually the beam fills a circle much larger than the one it was injected
-with, so the emittance has grown. An optical **mismatch** (a beam injected with
+with, so the emittance has grown.
+
+```{code-cell} julia
+:tags: [hide-input]
+:label: fig-injection-error
+:caption: An injection error in normalized phase space, tracked through the ring of this page with an octupole added so that the tune grows with amplitude. The bunch arrives with $\bar x'$ off by 3σ. For the first few turns it rotates about the closed orbit (+) as a whole, by $2\pi Q\approx 97^\circ$ per turn. Then the particles at larger amplitude run ahead, the bunch winds into a spiral, and it ends as a centred beam filling the predicted 2σ circle (red). Grey: the 2σ circle of the matched beam.
+
+using CairoMakie
+
+βf = beta_start(ring)
+oct_ring = synchrotron(1.27; b3 = 0.01/(βf^2*EMIT))    # Δx̄′ = −0.01 x̄³ (σ units): Q grows with amplitude
+ring_circle(r) = (r .* cos.(range(0, 2π, length=121)), r .* sin.(range(0, 2π, length=121)))
+
+"Phase-space snapshots, at the given turns, of a bunch spoiled by `spoil!` and tracked through `oct_ring`."
+function filament(spoil!, turns; N=4000)
+    c = matched_beam(MersenneTwister(7), N, βf)
+    spoil!(c)
+    packed = GPULattice(oct_ring, beam; dtype=Float64)
+    snaps = Dict{Int,Any}(); t = 0
+    for T in turns
+        T > t && (batch_ringpass!(c, packed, T - t); t = T)
+        snaps[T] = normalized(c, βf)
+    end
+    snaps
+end
+
+"A grid of snapshots; the last panel also shows the predicted filamented 2σ circle of radius r_final."
+function snapshot_grid(snaps, turns, ncol, r_final)
+    nrow = cld(length(turns), ncol)
+    fig = Figure(size=(230ncol, 240nrow), fontsize=13ncol/3)    # same type size once scaled to the page
+    for (k, T) in enumerate(turns)
+        i, j = cld(k, ncol), mod1(k, ncol)
+        ax = Axis(fig[i, j]; aspect=DataAspect(), title="turn $T", limits=(-8, 8, -8, 8),
+                  xlabel="x̄ [σ]", ylabel="x̄′ [σ]")
+        i < nrow && hidexdecorations!(ax; grid=false, ticks=false)
+        j > 1 && hideydecorations!(ax; grid=false, ticks=false)
+        X, P = snaps[T]
+        scatter!(ax, X, P; color=(PALETTE[1], 0.35), markersize=2.5, strokewidth=0)
+        lines!(ax, ring_circle(2.0)...; color=:gray55, linestyle=:dash)
+        k == length(turns) && lines!(ax, ring_circle(r_final)...; color=PALETTE[4], linestyle=:dash, linewidth=2)
+        scatter!(ax, [0.0], [0.0]; marker=:cross, color=:black, markersize=10)
+    end
+    fig
+end
+
+T_ERR = [0, 1, 2, 3, 4, 10, 20, 30, 45, 60, 100, 150, 200, 400, 1000, 3000]
+snapshot_grid(filament(c -> (c[:, 2] .+= 3sqrt(EMIT/βf)), T_ERR), T_ERR, 4, 2sqrt(1 + 3^2/2))
+```
+
+An optical **mismatch** (a beam injected with
 the wrong $\beta$ or $\alpha$; see [](../transverse_dynamics/emittance.md))
-filaments the same way into a larger ellipse of the matched shape. Both final
-emittances follow from averaging over the betatron phase:
+filaments the same way into a larger ellipse of the matched shape.
+
+```{code-cell} julia
+:tags: [hide-input]
+:label: fig-mismatch-filamentation
+:caption: An optical mismatch filaments the same way. The bunch arrives with $\beta$ three times too large, an ellipse stretched along $\bar x$ (grey: the matched 2σ circle). At first it simply rotates, by $2\pi Q$ per turn; then it shears into a spiral, and it ends as a round beam filling the predicted 2σ circle (red). Same ring and octupole as in the figure above.
+
+T_MIS = [0, 1, 2, 3, 10, 20, 40, 70, 100, 150, 400, 3000]
+snapshot_grid(filament(c -> (c[:, 1] .*= sqrt(3); c[:, 2] ./= sqrt(3)), T_MIS), T_MIS, 4,
+              2sqrt((3 + 1/3)/2))
+```
+
+Both final emittances follow from averaging over the betatron phase:
 
 $$
 \epsilon_{\mathrm{dipole}}=\epsilon_0+\tfrac12\,\Delta\bar A^2,
@@ -246,7 +364,7 @@ $$
 
 where $\Delta\bar A$ is the normalized amplitude of the injection error, and
 $(\beta_0,\alpha_0,\gamma_0)$ describe the injected beam while
-$(\beta,\alpha,\gamma)$ describe the lattice. Here the tune spread comes from
+$(\beta,\alpha,\gamma)$ describe the lattice. In the widget below the tune spread comes instead from
 the ring's natural chromaticity of −2.1 and an rms momentum spread of
 $10^{-3}$, so $\sigma_Q\approx 2\times10^{-3}$, and the beam is filamented
 after a few hundred turns:
@@ -342,6 +460,12 @@ The beam is then injected over many turns:
   the septum's side of phase space only after the bump has pulled the orbit
   away.
 
+```{figure} ../images/synchrotron/multiturn_idea.png
+:width: 75%
+:name: fig-multiturn-idea
+Multi-turn injection: fast bumpers make a closed-orbit bump at the septum whose amplitude varies from turn to turn.
+```
+
 The beam is "painted" into transverse phase space. Liouville's theorem has a
 price, though: beamlets cannot be laid on top of each other, so the stored
 emittance is much larger than that of a single beamlet, and particles that rotate
@@ -431,8 +555,20 @@ beam in the same region of phase space. A bump steers the stack onto the foil du
 injection and off it afterwards; any partially stripped H⁰ continue straight
 to a dump.
 
+```{figure} ../images/synchrotron/hminus_injection.png
+:width: 80%
+:name: fig-hminus-injection
+Charge-exchange injection: the H⁻ beam and the bumped circulating protons pass through the stripping foil together; the stripped protons join the circulating beam, while partly stripped H⁰ go on to a dump.
+```
+
 Charge-exchange injection is essential for high-intensity, low-loss machines:
 the best conventional multi-turn injection loses about 10 % of the beam, while
 H⁻ injection can reach losses around 0.02 %. Its limits come from the foil:
 heating, scattering of the circulating beam each time it crosses the foil, and
 the foil's lifetime.
+
+## Further reading
+
+Much of the injection material here, including several of the figures, follows
+the CERN Accelerator School course *Beam Injection, Extraction and Transfer*
+(Erice, 2017): <https://cas.web.cern.ch/schools/erice-2017>.

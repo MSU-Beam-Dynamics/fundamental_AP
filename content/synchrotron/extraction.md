@@ -81,6 +81,12 @@ Fast extraction removes the whole beam in one turn:
 - a betatron phase advance $\mu$ downstream, the deflected beam crosses the septum
   blade and the septum bends it into the extraction line.
 
+```{figure} ../images/synchrotron/single_turn_extraction.png
+:width: 95%
+:name: fig-single-turn-extraction
+Fast single-turn extraction: closed-orbit bumpers move the circulating beam close to the septum, the kicker deflects it into the septum, and a defocusing quadrupole in between enhances the kick. After M. Fraser, CERN Accelerator School, 2017.
+```
+
 The displacement a kick $\theta$ produces at the septum follows from the same
 transfer matrix as for injection,
 
@@ -97,7 +103,15 @@ septum.
 ## Non-resonant multi-turn extraction
 
 Some machines downstream want the beam spread over a few turns rather than
-delivered in one. CERN's PS fed the SPS this way for decades with its
+delivered in one.
+
+```{figure} ../images/synchrotron/multiturn_extraction.png
+:width: 80%
+:name: fig-multiturn-extraction
+Non-resonant multi-turn extraction: closed-orbit bumpers push the circulating beam across the septum, which peels part of it off into the extraction channel.
+```
+
+CERN's PS fed the SPS this way for decades with its
 *continuous transfer*:
 
 - slow bumpers move the beam so that the septum blade cuts into it;
@@ -190,6 +204,39 @@ tune slowly toward the resonance shrinks the triangle, which peels the beam off
 from the outside in and sets the extraction rate. Particles that land on the
 wire itself are lost; that fraction is roughly the wire thickness divided by
 the step a particle makes in three turns.
+
+```{code-cell} julia
+:tags: [hide-input]
+:label: fig-slow-extraction-portrait
+:caption: Phase portrait near the third-integer resonance, at $Q=1+1/3+0.0017$ with a sextupole that makes the triangle's inscribed radius $h=2.5\sigma$, as at the start of the simulation below. Particles inside the triangle (blue) circulate on closed curves. Particles started just outside it (orange) hop from arm to arm every turn, a little farther out each time they return, and leave along the arms; one arm crosses the septum wire.
+
+using CairoMakie
+
+let δq = 0.335 - 1/3, S = 4π*δq/2.5            # S: normalized sextupole strength, h = 4πδq/S
+    r3 = synchrotron(1 + 1/3 + δq; b2 = -S/(σ*β^1.5))
+    β3 = beta_start(r3)
+    x0 = [0.5, 1.0, 1.5, 2.0, 2.4, 2.8, -2.55, -2.65, -2.8, -3.0]   # start at x̄ = x0 σ, x̄′ = 0
+    c  = zeros(length(x0), 6); c[:, 1] .= x0 .* (sqrt(β3)*σ)
+    X = [Float64[] for _ in x0]; P = [Float64[] for _ in x0]
+    for _ in 1:900
+        ringpass!(c, r3, beam, zeros(Int, length(x0)), 1)
+        x, p = normalized(c, β3)
+        for i in eachindex(x0)
+            (isfinite(x[i]) && abs(x[i]) < 12 && abs(p[i]) < 12) || continue
+            push!(X[i], x[i]); push!(P[i], p[i])
+        end
+    end
+    fig = Figure(size=(540, 500), fontsize=15)
+    ax = Axis(fig[1, 1]; aspect=DataAspect(), xlabel="x̄ [σ]", ylabel="x̄′ [σ]", limits=(-10, 10, -10, 10))
+    for i in eachindex(x0)
+        bound = length(X[i]) == 900 && maximum(abs, X[i]) < 6
+        scatter!(ax, X[i], P[i]; color=(bound ? PALETTE[1] : PALETTE[2], 0.6), markersize=2.5, strokewidth=0)
+    end
+    vlines!(ax, [8.0]; color=:gray30, linewidth=3)
+    text!(ax, 7.7, -9.4; text="septum wire", align=(:right, :bottom), fontsize=13)
+    fig
+end
+```
 
 The simulation below tracks this process: the tune starts at $1/3+0.0017$,
 where the triangle has a 2.5σ radius, and is ramped onto the resonance. Compare a **linear** ramp with one **shaped** so that
