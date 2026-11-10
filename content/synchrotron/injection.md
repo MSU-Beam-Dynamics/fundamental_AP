@@ -66,14 +66,42 @@ phase-space plots on this page and the next use $\bar x$ and $\bar x'$ in units
 of the rms size $\sigma=\sqrt\epsilon$ of the circulating beam.
 
 The simulations use one small model ring throughout: four thin-lens FODO
-cells, 80 m around (about the size of a medical synchrotron). Every
-plot is taken at the centre of a focusing quadrupole, where $\alpha=0$, so
-$\bar x'=\sqrt\beta\,p_x$. For a thin-lens FODO cell
-$\sin(\mu/2)=L/(2f)$, so the quadrupole strength that gives any chosen tune
-follows directly:
+cells, 80 m around (about the size of a medical synchrotron). For a thin-lens
+FODO cell $\sin(\mu/2)=L/(2f)$, so the quadrupole strength that gives any
+chosen tune follows directly. After the next figure, every plot is taken at the
+point A, the centre of a focusing quadrupole, where $\alpha=0$, so
+$\bar x'=\sqrt\beta\,p_x$.
+
+The figure below shows the ring's optics, and then compares the two
+descriptions of phase space at four points A–D in the first cell, one per
+tab. Each tab shows a matched beam, and one particle observed at that point on
+eight successive turns (numbered 0–7), in both coordinate systems.
+The normalization is a linear map,
+
+$$
+\begin{pmatrix}\bar x\\ \bar x'\end{pmatrix}=
+\begin{pmatrix}1/\sqrt\beta & 0\\ \alpha/\sqrt\beta & \sqrt\beta\end{pmatrix}
+\begin{pmatrix}x\\ x'\end{pmatrix},
+$$
+
+with determinant 1. It therefore keeps areas, and with them the emittance. It
+sends straight lines through the origin to straight lines through the origin,
+so the gray rays connect the same points in both lower panels.
+
+- **Top, the ring.** $\beta_x(s)$ (left axis) and the phase advance
+  $\mu_x(s)/2\pi$ (right axis). The phase grows fastest where $\beta$ is
+  small, and after one turn it reaches the tune $Q=1.27$. The point of the
+  current tab is in black.
+- **Bottom left, physical coordinates.** The beam fills an ellipse whose shape
+  and tilt depend on the point, and the particle jumps around it in steps of
+  unequal length. The axis ranges are the same in every tab.
+- **Bottom right, normalized coordinates.** At every point the ellipse becomes
+  the same circle, and every turn is the same clockwise rotation by $2\pi Q$.
 
 ```{code-cell} julia
-using StaticArrays, TrackPad, TrackPadWidgets, Random, Statistics
+:tags: [hide-input]
+
+using StaticArrays, TrackPad, TrackPadWidgets, Random, Statistics, CairoMakie
 
 beam = Beam(2.0e9; mass=TrackPad.M_PROTON, charge=1.0)    # 2 GeV kinetic protons
 
@@ -115,14 +143,218 @@ matched_beam(rng, N, β; σδ=0.0) =
                      longitudinal=[1.0e-6 0.0; 0.0 max(σδ, 1e-12)^2])
 
 ring = synchrotron(1.27)
-println("tune  = ", gettune(ring, beam))
-println("β     = ", round(beta_start(ring); digits=2), " m at the observation point")
-println("chromaticity ξ = ", round.(getchrom(ring, beam; centered=true); digits=3))
+
+# The figure in the tabs below: the ring's optics, and phase space at A, B, C or D.
+
+# Four observation points in the first cell, each given by the elements from the start
+# of the ring (the centre of QF) up to it. A and C lie between the two halves of a thin
+# quadrupole, where α = 0.
+const OBS_POINTS = let k = inv_focal(1.27)
+    [("A", AbstractElement[]),
+     ("B", AbstractElement[thin_quad(k/2, :QF), Drift(LHALF/2)]),
+     ("C", AbstractElement[thin_quad(k/2, :QF), Drift(LHALF), thin_quad(-k/2, :QD)]),
+     ("D", AbstractElement[thin_quad(k/2, :QF), Drift(LHALF), thin_quad(-k, :QD), Drift(LHALF/2)])]
+end
+
+"Carry the phase-space vector `r` from the start of the ring through the elements `line`."
+to_point(line, r) = isnothing(line) ? r : linepass(line, r, beam)
+
+"""
+    phase_space_figure(ip)
+
+The ring's βₓ and phase advance (top), with observation point `ip` of `OBS_POINTS`
+highlighted, and the same beam and the same particle at that point in physical
+(bottom left) and normalized (bottom right) phase space. The axis ranges are the same
+for every point, so the figures can be compared directly.
+"""
+function phase_space_figure(ip)
+    β0, C, σ = beta_start(ring), NCELL*2LHALF, sqrt(EMIT)
+    tw = periodic_twiss(ring, beam; sample_integrator_steps=true, max_step=0.1)
+    Q  = tw.mux[end]/2π                                   # the full tune, 1.27
+    ξ  = getchrom(ring, beam; centered=true)[1]           # natural chromaticity
+
+    # β, α and s at every observation point.
+    optics = map(OBS_POINTS) do (_, elems)
+        isempty(elems) && return (β=β0, α=0.0, s=0.0, μ=0.0)
+        t = transport_twiss(Lattice(elems), beam, optics4DUC(β0, 0.0, β0, 0.0))
+        (β=t.betax[end], α=t.alphax[end] + 0.0, s=t.s[end], μ=t.mux[end])
+    end
+    name, elems = OBS_POINTS[ip]
+    line = isempty(elems) ? nothing : Lattice(elems)
+    β, α = optics[ip].β, optics[ip].α
+    γ = (1 + α^2)/β
+
+    # The same matched beam and the same particle (turns 0–7), carried to this point.
+    cloud = matched_beam(MersenneTwister(3), 800, β0)
+    for i in axes(cloud, 1)
+        cloud[i, :] .= to_point(line, SVector{6}(cloud[i, :]))
+    end
+    r = SVector(2.6sqrt(β0*EMIT), 0.6sqrt(EMIT/β0), 0.0, 0.0, 0.0, 0.0)
+    pts = SVector{6,Float64}[]
+    for _ in 0:7
+        push!(pts, to_point(line, r))
+        r = linepass(ring, r, beam)                       # one more turn, back at the start
+    end
+    x  = [p[1] for p in pts];  xp = [p[2] for p in pts]
+
+    norm_x(x, xp)  = x ./ sqrt(β) ./ σ                       # x̄  in units of σ
+    norm_xp(x, xp) = (α .* x .+ β .* xp) ./ sqrt(β) ./ σ     # x̄′ in units of σ
+    W = γ*x[1]^2 + 2α*x[1]*xp[1] + β*xp[1]^2                # the particle's invariant
+    φ = range(0, 2π, length=200)
+    ellipse(w) = (sqrt(w*β) .* cos.(φ), -sqrt(w/β) .* (α .* cos.(φ) .+ sin.(φ)))
+
+    fig = Figure(size=(980, 800), fontsize=15)
+
+    # Top: β and the phase advance around the ring, with the quadrupoles as a strip.
+    top = β0/(1 - 0.17)                                   # room for the strip above the data
+    axβ = Axis(fig[1, 1:2]; xlabel="s [m]", ylabel="βₓ [m]", ylabelcolor=PALETTE[1],
+               title="model ring: Qₓ = Qᵧ = $(round(Q; digits=2)), natural chromaticity ξ = $(replace(string(round(ξ; digits=2)), "-" => "−"))")
+    axμ = Axis(fig[1, 1:2]; ylabel="μₓ/2π", yaxisposition=:right, ylabelcolor=PALETTE[4],
+               yticklabelcolor=PALETTE[4], yticks=0:0.25:1.25, ygridvisible=false)
+    hidespines!(axμ); hidexdecorations!(axμ); linkxaxes!(axβ, axμ)
+    base, h = top*(1 - 0.045), top*0.035
+    hlines!(axβ, [base]; color=:gray50, linewidth=1)
+    for n in 0:2NCELL                                    # QF above the line, QD below
+        poly!(axβ, Rect(n*LHALF - 0.6, iseven(n) ? base : base - h, 1.2, h); color=(:seagreen, 0.7))
+    end
+    for shift in (-C, 0.0)                               # periodic: also show the end of the previous turn
+        lines!(axβ, tw.s .+ shift, tw.betax; color=PALETTE[1], linewidth=2.5)
+    end
+    lines!(axμ, tw.s, tw.mux ./ 2π; color=PALETTE[4], linewidth=2)
+    text!(axμ, C, Q; text="Q = $(round(Q; digits=2)) ", align=(:right, :bottom), color=PALETTE[4])
+    for (j, (lab, _)) in enumerate(OBS_POINTS)           # this point in black, the others in gray
+        c, o = j == ip ? (:black, optics[j]) : (:gray65, optics[j])
+        lines!(axβ, [o.s, o.s], [0, β0]; color=c, linestyle=:dash, linewidth=1)
+        scatter!(axβ, [o.s], [o.β]; color=c, markersize=j == ip ? 11 : 8)
+        text!(axβ, o.s, β0; text=" " * lab, align=(:left, :bottom), color=c,
+              fontsize=j == ip ? 17 : 14, font=:bold)
+    end
+    xlims!(axβ, -2, C + 2); ylims!(axβ, 0, top); ylims!(axμ, 0, Q/(1 - 0.17))
+
+    # Bottom: phase space at this point, physical (left) and normalized (right).
+    colors = cgrad(:viridis, 8; categorical=true)
+    axL = Axis(fig[2, 1]; xlabel="x [mm]", ylabel="x′ [mrad]",
+               title="physical phase space at $name (β = $(round(β; digits=1)) m, α = $(replace(string(round(α; digits=2) + 0.0), "-" => "−")))")
+    axR = Axis(fig[2, 2]; xlabel="x̄ [σ]", ylabel="x̄′ [σ]", aspect=DataAspect(),
+               title=ip == 1 ? "normalized phase space at A" :
+                     "normalized phase space at $name ($(round(Int, rad2deg(optics[ip].μ)))° after A)")
+
+    # The same ranges at every point: wide enough for the largest β and γ.
+    lim = 1.25*sqrt(W)/σ
+    xl = 1.2*sqrt(W*maximum(o.β for o in optics))*1e3
+    yl = 1.2*sqrt(W*maximum((1 + o.α^2)/o.β for o in optics))*1e3
+    for (ax, fx, fy, sx, sy, L) in ((axL, (a, b) -> a, (a, b) -> b, 1e3, 1e3, (xl, yl)),
+                                    (axR, norm_x, norm_xp, 1.0, 1.0, (lim, lim)))
+        scatter!(ax, sx .* fx(cloud[:, 1], cloud[:, 2]), sy .* fy(cloud[:, 1], cloud[:, 2]);
+                 color=(:gray60, 0.35), markersize=3, strokewidth=0)
+        for w in (EMIT, 4EMIT)                                   # 1σ and 2σ contours
+            ex, ey = ellipse(w)
+            lines!(ax, sx .* fx(ex, ey), sy .* fy(ex, ey); color=:gray50, linestyle=:dash, linewidth=1)
+        end
+        ex, ey = ellipse(W)                                      # the particle's own ellipse
+        lines!(ax, sx .* fx(ex, ey), sy .* fy(ex, ey); color=PALETTE[1], linewidth=2)
+        X, Y = sx .* fx(x, xp), sy .* fy(x, xp)
+        for i in 1:8                                             # rays from the origin
+            lines!(ax, [0, X[i]], [0, Y[i]]; color=(:gray40, 0.5), linewidth=1)
+        end
+        scatter!(ax, X, Y; color=[colors[i] for i in 1:8], markersize=14, strokecolor=:black, strokewidth=1)
+        for i in 1:8                                             # labels pushed outward on screen
+            d = (X[i]/L[1], Y[i]/L[2]); d = d ./ hypot(d...)
+            text!(ax, X[i], Y[i]; text=string(i - 1), align=(:center, :center), fontsize=15,
+                  offset=(17d[1], 17d[2]))
+        end
+        scatter!(ax, [0.0], [0.0]; marker=:cross, color=:black, markersize=10)
+    end
+    # The angle of one turn, between points 0 and 1 in normalized coordinates.
+    θ0 = atan(norm_xp(x[1], xp[1]), norm_x(x[1], xp[1]))
+    θ1 = θ0 - 2π*Q % (2π)
+    arc = range(θ0, θ1, length=40)
+    lines!(axR, 0.7 .* cos.(arc), 0.7 .* sin.(arc); color=PALETTE[4], linewidth=2.5)
+    text!(axR, 1.45cos((θ0 + θ1)/2), 1.45sin((θ0 + θ1)/2); text="2πQ", color=PALETTE[4],
+          align=(:center, :center), fontsize=15)
+    limits!(axR, -lim, lim, -lim, lim)
+    limits!(axL, -xl, xl, -yl, yl)
+    rowsize!(fig.layout, 1, Relative(0.34))
+    fig
+end
+nothing
 ```
 
-The computed optics confirm the tune of 1.27 that the quadrupoles were set for. Without
-any sextupoles, the ring's natural chromaticity is about −2; this matters
-below, where it is what makes an injection error grow into a larger emittance.
+```{code-cell} julia
+:tags: [remove-cell]
+:label: fig-phase-space-A
+
+phase_space_figure(1)
+```
+
+```{code-cell} julia
+:tags: [remove-cell]
+:label: fig-phase-space-B
+
+phase_space_figure(2)
+```
+
+```{code-cell} julia
+:tags: [remove-cell]
+:label: fig-phase-space-C
+
+phase_space_figure(3)
+```
+
+```{code-cell} julia
+:tags: [remove-cell]
+:label: fig-phase-space-D
+
+phase_space_figure(4)
+```
+
+::::{tab-set}
+:::{tab-item} A · centre of QF
+**A, the centre of a focusing quadrupole.** $\beta$ is at its largest and
+$\alpha=0$. The ellipse is upright, wide in $x$ and narrow in $x'$, and
+normalizing only rescales the two axes.
+
+```{embed} #fig-phase-space-A
+:remove-input: true
+```
+:::
+:::{tab-item} B · drift after QF
+**B, halfway along the drift after QF.** $\beta$ is falling steeply, so
+$\alpha=-\beta'/2$ is large and positive. The beam is converging: particles
+with $x>0$ have $x'<0$, which tilts the ellipse.
+
+```{embed} #fig-phase-space-B
+:remove-input: true
+```
+:::
+:::{tab-item} C · centre of QD
+**C, the centre of a defocusing quadrupole.** $\beta$ is at its smallest and
+$\alpha=0$ again. The ellipse is upright once more, now narrow in $x$ and tall
+in $x'$.
+
+```{embed} #fig-phase-space-C
+:remove-input: true
+```
+:::
+:::{tab-item} D · drift before QF
+**D, halfway along the drift before the next QF.** $\beta$ is growing and
+$\alpha<0$. The beam is diverging, and the ellipse tilts the other way.
+
+```{embed} #fig-phase-space-D
+:remove-input: true
+```
+:::
+::::
+
+In physical coordinates the beam changes shape from point to point, while its
+area, the emittance, stays the same. In normalized coordinates every tab shows
+the same circle. Only the angle of the particle's points changes. They turn
+clockwise by the phase advance from A, which is given in the panel title.
+
+The computed optics confirm the tune of 1.27 that the quadrupoles were set
+for. Without any sextupoles, the ring's natural chromaticity is about −2; this
+matters below, where it is what makes an injection error grow into a larger
+emittance.
 
 ## Single-turn injection
 

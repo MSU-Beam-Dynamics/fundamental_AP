@@ -11,6 +11,7 @@ Reorganized from the earlier `fundamental_AP` notes; chapters:
 - **Transverse Dynamics** — multipoles, Hill's equation, transfer matrices, C-S parameters, FODO cell, emittance, coupling, dispersion, chromaticity
 - **Longitudinal Dynamics** — RF acceleration, synchrotron motion
 - **Synchrotron** — operating principle, injection, extraction
+- **Colliders** — center-of-mass energy, luminosity, interaction region, beam–beam effect
 
 ## Repository layout
 

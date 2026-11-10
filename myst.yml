@@ -33,6 +33,12 @@ project:
         - file: content/synchrotron/synchrotron_principle.md
         - file: content/synchrotron/injection.md
         - file: content/synchrotron/extraction.md
+    - title: Colliders
+      children:
+        - file: content/collider/collider_overview.md
+        - file: content/collider/luminosity.md
+        - file: content/collider/interaction_region.md
+        - file: content/collider/beam_beam.md
 site:
   template: book-theme
   options:
